@@ -21,6 +21,11 @@ const DATA = join(root, 'data');
 const RUNS = join(DATA, 'runs.json');
 mkdirSync(DATA, { recursive: true });
 
+// サンプル資料：配信名（英数字）→ 実ファイル名
+const SAMPLES = {
+  'plan_old.pdf': '平面図_旧.pdf', 'plan_new.pdf': '平面図_新.pdf', 'tategu.xlsx': '建具表.xlsx',
+  'shiage.xlsx': '仕上表.xlsx', 'estimate_old.xlsx': '見積_旧.xlsx', 'estimate_new.xlsx': '見積_新.xlsx',
+};
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json',
@@ -84,7 +89,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (path.startsWith('/api/')) return json(res, 404, { error: 'not found' });
     // 架空のサンプル資料（「サンプルで試す」用）
-    if (path.startsWith('/samples/') && /\.(pdf|xlsx)$/i.test(path)) return serveStatic(res, path.slice('/samples'.length), join(root, 'samples'));
+    if (path.startsWith('/samples/') && SAMPLES[path.slice(9)]) return serveStatic(res, '/' + SAMPLES[path.slice(9)], join(root, 'samples'));
     return serveStatic(res, path === '/' ? '/index.html' : path);
   } catch (e) {
     console.error(e);
