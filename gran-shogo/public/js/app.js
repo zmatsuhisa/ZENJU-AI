@@ -384,42 +384,121 @@ function renderList() {
 }
 
 // 図面の重ね合わせ（今この画面で読み込んだ新旧PDFがあるときだけ）
-async function showOverlay(pageNo = 1) {
+// ページの切り替え：◀ ▶ の矢印、横にスクロールできるページ一覧（変更の件数つき）、キーボードの ← →
+const ov = { docs: null, pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0 };
+
+async function showOverlay() {
   const slot = $('#overlay-slot');
   if (!slot) return;
-  slot.innerHTML = `<section class="card section"><div class="section-h"><span class="t">図面の重ね合わせ</span><span class="prog" id="ov-prog">描いています…</span></div>
+  slot.innerHTML = `<section class="card section"><div class="section-h"><span class="t">図面の重ね合わせ</span><span class="prog" id="ov-prog">読み込んでいます…</span></div>
+    <div class="pager no-print" id="ov-pager" hidden>
+      <button class="pg-arrow" type="button" data-go="-1" aria-label="前のページ">‹</button>
+      <div class="pg-strip" id="ov-strip" role="group" aria-label="ページ"></div>
+      <button class="pg-arrow" type="button" data-go="1" aria-label="次のページ">›</button>
+    </div>
     <div class="pad legend no-print"><span><i class="o"></i>変更前だけにある線・文字</span><span><i class="n"></i>変更後だけにある線・文字</span><span><i class="c"></i>変わった場所</span>
     <span class="seg" role="group" aria-label="重ね合わせの表示" style="margin-left:auto"><button type="button" class="on" data-ov="mix" aria-pressed="true">重ね</button><button type="button" data-ov="old" aria-pressed="false">変更前</button><button type="button" data-ov="new" aria-pressed="false">変更後</button></span></div>
     <div class="overlay-wrap" id="ov"></div></section>`;
   try {
     const [pa, pb] = await Promise.all([state.session.old, state.session.new].map(f => pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise));
-    const width = 1800;
-    const [{ canvas: ca }, { canvas: cb, scale }] = await Promise.all([renderPage(pa, pageNo, width), renderPage(pb, Math.min(pageNo, pb.numPages), width)]);
-    const { canvas, boxes, shift } = compose(ca, cb);
-    // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
-    const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
-    const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === pageNo);
-    for (const f of textBoxes) {
-      const { x, y, w, h: hh } = f.at;
-      ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
+    Object.assign(ov, { docs: [pa, pb], pages: Math.max(pa.numPages, pb.numPages), page: 1, mode: 'mix', cache: new Map(), counts: {} });
+    // 文字の違いはもう分かっているので、ページ一覧に先に件数を出す
+    for (const f of state.run?.findings || []) {
+      const p = f.at?.page || Number((f.obs?.[1]?.loc || '').match(/^p\.(\d+)/)?.[1]);
+      if (p) ov.counts[p] = (ov.counts[p] || 0) + 1;
     }
-    const views = { mix: canvas, old: ca, new: cb };
-    const ov = $('#ov');
-    ov.replaceChildren(canvas);
-    const pages = Math.max(pa.numPages, pb.numPages);
-    const pick = pages > 1 ? ` <select class="pick" id="ov-page" aria-label="ページ">${Array.from({ length: pages }, (_, i) => `<option value="${i + 1}" ${i + 1 === pageNo ? 'selected' : ''}>p.${i + 1}</option>`).join('')}</select>` : '';
-    $('#ov-prog').innerHTML = `p.${pageNo}　線の違い ${boxes.length}か所・文字の違い ${textBoxes.length}か所${shift.dx || shift.dy ? `（位置ずれ ${shift.dx}, ${shift.dy}px を補正）` : ''}${pick}`;
-    $('#ov-page')?.addEventListener('change', e => showOverlay(Number(e.target.value)));
     slot.querySelectorAll('[data-ov]').forEach(b => b.onclick = () => {
+      ov.mode = b.dataset.ov;
       slot.querySelectorAll('[data-ov]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
-      ov.replaceChildren(views[b.dataset.ov]);
+      const c = ov.cache.get(ov.page);
+      if (c) $('#ov').replaceChildren(c.views[ov.mode]);
     });
+    if (ov.pages > 1) {
+      $('#ov-pager').hidden = false;
+      $('#ov-pager').querySelectorAll('[data-go]').forEach(b => b.onclick = () => goPage(ov.page + Number(b.dataset.go)));
+      $('#ov-strip').onclick = e => { const b = e.target.closest('[data-p]'); if (b) goPage(Number(b.dataset.p)); };
+    }
+    renderStrip();
+    // 変更のある最初のページから見せる
+    const first = Object.keys(ov.counts).map(Number).sort((a, b) => a - b)[0];
+    await goPage(first || 1);
   } catch (e) {
     console.error(e);
     $('#ov-prog').textContent = '重ね合わせを描けませんでした';
   }
 }
+
+function renderStrip() {
+  const strip = $('#ov-strip');
+  if (!strip) return;
+  strip.innerHTML = Array.from({ length: ov.pages }, (_, i) => {
+    const p = i + 1, n = ov.counts[p] || 0;
+    return `<button type="button" class="pg ${p === ov.page ? 'on' : ''} ${n ? 'has' : ''}" data-p="${p}" ${p === ov.page ? 'aria-current="page"' : ''} aria-label="${p}ページ${n ? `（変更 ${n}か所）` : ''}">p.${p}${n ? `<i>${n}</i>` : ''}</button>`;
+  }).join('');
+  const on = strip.querySelector('.pg.on');
+  if (on) strip.scrollTo({ left: on.offsetLeft - strip.clientWidth / 2 + on.offsetWidth / 2, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  $('#ov-pager')?.querySelectorAll('[data-go]').forEach(b => { b.disabled = (b.dataset.go === '-1' ? ov.page <= 1 : ov.page >= ov.pages); });
+}
+
+async function goPage(p) {
+  if (!ov.docs || p < 1 || p > ov.pages) return;
+  ov.page = p;
+  const my = ++ov.seq; // 素早く押したときは最後のページだけ描く
+  renderStrip();
+  const prog = $('#ov-prog');
+  if (!ov.cache.has(p)) {
+    prog.textContent = `p.${p} を描いています…`;
+    $('#ov').classList.add('loading');
+    const [pa, pb] = ov.docs;
+    const width = 1800;
+    const [{ canvas: ca }, { canvas: cb, scale }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), width), renderPage(pb, Math.min(p, pb.numPages), width)]);
+    const { canvas, boxes, shift } = compose(ca, cb);
+    // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
+    const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === p);
+    for (const f of textBoxes) {
+      const { x, y, w, h: hh } = f.at;
+      ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
+    }
+    ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift });
+    // 大きな画像なので、近くの数ページ分だけ残す
+    for (const k of ov.cache.keys()) if (Math.abs(k - p) > 2) ov.cache.delete(k);
+    ov.counts[p] = boxes.length + textBoxes.length; // 描けたら、線と文字の違いを合わせた件数にする
+  }
+  if (my !== ov.seq) return;
+  $('#ov').classList.remove('loading');
+  const c = ov.cache.get(p);
+  $('#ov').replaceChildren(c.views[ov.mode]);
+  $('#ov').scrollTop = 0;
+  prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}ページ　` : ''}線の違い ${c.lines}か所・文字の違い ${c.text}か所${c.shift.dx || c.shift.dy ? `（位置ずれ ${c.shift.dx}, ${c.shift.dy}px を補正）` : ''}`;
+  renderStrip();
+  // 次のページを先に描いておく（押したらすぐ出るように）
+  if (p < ov.pages && !ov.cache.has(p + 1)) setTimeout(() => { if (ov.page === p && my === ov.seq) prefetch(p + 1); }, 300);
+}
+
+async function prefetch(p) {
+  if (!ov.docs || ov.cache.has(p)) return;
+  const [pa, pb] = ov.docs;
+  const [{ canvas: ca }, { canvas: cb, scale }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), 1800), renderPage(pb, Math.min(p, pb.numPages), 1800)]);
+  if (ov.cache.has(p)) return;
+  const { canvas, boxes, shift } = compose(ca, cb);
+  const ctx = canvas.getContext('2d');
+  ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
+  const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === p);
+  for (const f of textBoxes) { const { x, y, w, h: hh } = f.at; ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale); }
+  ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift });
+  ov.counts[p] = boxes.length + textBoxes.length;
+  renderStrip();
+}
+
+// ← → キーでページ送り（入力中・メニューを開いているときは除く）
+document.addEventListener('keydown', e => {
+  if (!ov.docs || ov.pages < 2 || !$('#ov-strip') || drawer.classList.contains('open')) return;
+  if (e.target.closest('input, textarea, select')) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); goPage(ov.page - 1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goPage(ov.page + 1); }
+});
 
 // ---------- 指摘の詳細 ----------
 async function showItem(runId, fid) {
