@@ -1,0 +1,19 @@
+{
+  "name": "gran-shogo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "グランOS 資料照合：図面・仕様書（PDF）と建具表・見積（Excel）の変更箇所と食い違いを見つける",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test test/*.test.js",
+    "samples": "python3 samples/make_samples.py",
+    "postinstall": "node server/copy-vendor.js",
+    "icons": "node server/copy-icons.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "pdfjs-dist": "4.10.38",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

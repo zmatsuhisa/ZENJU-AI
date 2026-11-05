@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>資料照合｜グランOS</title>
+  <!-- グランOS ひな形 v2.1 の骨組みで作成。見た目は gran-os-base.css、固有の部品だけ app.css -->
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#F6AB00">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="資料照合">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Poppins:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="gran-os-base.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg class="mark" viewBox="0 0 192 192" aria-hidden="true"><g fill="#F6AB00">
+        <rect x="0" y="0" width="192" height="44" rx="6"></rect>
+        <rect x="0" y="0" width="44" height="192" rx="6"></rect>
+        <rect x="70" y="74" width="122" height="44" rx="6"></rect>
+        <rect x="70" y="148" width="122" height="44" rx="6"></rect>
+        <rect x="70" y="74" width="46" height="118"></rect>
+      </g></svg>
+      <span><span class="en">GRANHOUSE</span><span class="jp">資料照合</span></span>
+    </a>
+    <nav class="nav" aria-label="メインメニュー">
+      <a href="#/" data-nav="check" aria-label="照合する">CHECK</a>
+      <a href="#/result" data-nav="result" aria-label="照合結果">RESULT</a>
+      <a href="#/history" data-nav="history" aria-label="照合の記録">HISTORY</a>
+    </nav>
+    <button class="list-menu-button top-list-menu" id="menu-button" type="button" aria-label="表示設定を開く" aria-controls="list-drawer" aria-expanded="false">
+      <span class="menu-lines" aria-hidden="true"><i></i><i></i><i></i></span><span>表示設定</span>
+    </button>
+    <div class="sync"><span><i class="dot" id="sync-dot"></i><span id="sync-text">準備中</span></span></div>
+  </header>
+
+  <main class="app" id="app" aria-live="polite"></main>
+
+  <div class="list-drawer-backdrop" id="backdrop" hidden></div>
+  <aside class="list-drawer" id="list-drawer" role="dialog" aria-modal="true" aria-label="表示設定" aria-hidden="true" inert>
+    <div class="list-drawer-head"><strong>表示設定</strong><button class="list-drawer-close" id="menu-close" type="button" aria-label="表示設定を閉じる">×</button></div>
+    <div class="drawer-controls">
+      <div class="drawer-field"><label for="q">指摘を検索</label><input class="search" id="q" type="search" placeholder="記号・品番・資料名で探す"></div>
+      <div class="drawer-field"><span class="drawer-label">指摘の種類</span>
+        <div class="seg seg-kind" role="group" aria-label="指摘の種類">
+          <button type="button" data-f="all" class="on" aria-pressed="true">すべて</button>
+          <button type="button" data-f="ng" aria-pressed="false">不一致</button>
+          <button type="button" data-f="check" aria-pressed="false">要確認</button>
+          <button type="button" data-f="change" aria-pressed="false">変更</button>
+          <button type="button" data-f="done" aria-pressed="false">確認済み</button>
+          <button type="button" data-f="ai" aria-pressed="false">AIの指摘</button>
+        </div></div>
+      <div class="drawer-field"><label for="sort">並び順</label><select class="pick" id="sort">
+        <option value="sev">重要な順</option><option value="key">記号・品番の順</option><option value="doc">資料の順</option></select></div>
+      <div class="drawer-field"><span class="drawer-label">表示方法</span>
+        <div class="seg seg-view" role="group" aria-label="表示方法"><button type="button" data-v="card" class="on" aria-pressed="true">カード</button><button type="button" data-v="text" aria-pressed="false">テキスト</button></div></div>
+    </div>
+    <button class="list-drawer-refresh" id="refresh" type="button">再読み込み</button>
+    <p class="drawer-msg" id="drawer-msg" hidden></p>
+  </aside>
+
+  <script type="module" src="js/app.js"></script>
+  <script>if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+</body>
+</html>
