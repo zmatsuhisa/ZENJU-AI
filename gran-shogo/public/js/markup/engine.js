@@ -533,3 +533,6 @@ function pageView(scan, hand, items, others) {
   }
   return { canvas: c, scale: s };
 }
+
+// テスト用（画面・opencv を使わない部品だけ）
+export const __test = { textDiffMask, wordsIn, applyH, invert3, mul3 };

@@ -112,6 +112,16 @@ const plabel = p => (st.result.names.scans.length > 1 ? `${p.scanIdx + 1}回目 
 function markLater(pages, n) {
   if (n < 2) return;
   const tgt = p => p.afterPage ?? p.refPage;
+  // 別の回の書き込みと重なる変更は「指示外」ではない（その回の指示の反映）。同じ図面ページに2回目以降は重ねて出さない
+  const seen = new Map();
+  for (const a of pages) {
+    a.others = a.others.filter(o => !pages.some(b => b !== a && tgt(b) && tgt(b) === tgt(a) && b.items.some(j => overlap(o.box, j.box) > 0)));
+    const key = tgt(a);
+    if (key == null) continue;
+    const prev = seen.get(key) || [];
+    a.others = a.others.filter(o => !prev.some(q => overlap(o.box, q.box) > 0.5));
+    seen.set(key, prev.concat(a.others));
+  }
   for (const a of pages) for (const it of a.items) {
     const hit = pages.find(b => b.scanIdx > a.scanIdx && tgt(b) && tgt(b) === tgt(a) && b.items.some(j => overlap(it.box, j.box) > 0.25));
     if (hit) it.later = hit.scanIdx;
