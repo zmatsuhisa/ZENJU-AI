@@ -10,6 +10,8 @@ const files = [
   ['node_modules/pdfjs-dist/legacy/build/pdf.min.mjs', 'pdf.min.mjs'],
   ['node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'pdf.worker.min.mjs'],
   ['node_modules/xlsx/xlsx.mjs', 'xlsx.mjs'],
+  // 書き込みの洗い出し（画像処理）。使うときだけ読み込む
+  ['node_modules/@techstark/opencv-js/dist/opencv.js', 'opencv.js'],
 ];
 for (const [src, dst] of files) {
   const p = join(root, src);

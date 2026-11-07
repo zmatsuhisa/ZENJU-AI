@@ -7,8 +7,10 @@ import { diffPdf, diffXlsx } from './core/diff.js';
 import { crossCheck, guessRole, changesToFindings, ROLES } from './core/check.js';
 import { escapeHtml as h } from './core/normalize.js';
 import { renderPage, compose } from './overlay.js';
+import { showMarkup } from './markup/view.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs', import.meta.url).href;
+const CV_SRC = new URL('../vendor/opencv.js', import.meta.url).href;
 const PDF_OPTS = { cMapUrl: new URL('../vendor/cmaps/', import.meta.url).href, cMapPacked: true, standardFontDataUrl: new URL('../vendor/standard_fonts/', import.meta.url).href };
 
 const $ = s => document.querySelector(s);
@@ -80,12 +82,12 @@ function countOf(findings = [], confirmed = {}) {
 }
 
 function route() {
-  // #check / #result / #history / #run-<記録> / #item-<記録>-<指摘>
+  // #check / #markup / #result / #history / #run-<記録> / #item-<記録>-<指摘>
   const hash = location.hash || '#check';
   const m = hash.match(/^#(\w+)(?:-(\w+))?(?:-(\w+))?/) || [];
   const page = m[1] === 'check' ? '' : (m[1] || '');
   document.querySelectorAll('.nav a').forEach(a => {
-    const on = a.dataset.nav === ({ '': 'check', run: 'result', result: 'result', item: 'result', history: 'history' }[page]);
+    const on = a.dataset.nav === ({ '': 'check', run: 'result', result: 'result', item: 'result', history: 'history', markup: 'markup' }[page]);
     a.classList.toggle('active', on);
     on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
   });
@@ -94,6 +96,7 @@ function route() {
   if (page === 'item' && m[2] && m[3]) return showItem(m[2], m[3]);
   if (page === 'result') return state.run ? (location.hash = `#run-${state.run.id}`) : showLatest();
   if (page === 'history') return showHistory();
+  if (page === 'markup') return showMarkup({ app, pdfjs, PDF_OPTS, cvSrc: CV_SRC, phead, h, toast, bindDrop });
   return showCheck();
 }
 
