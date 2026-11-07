@@ -155,7 +155,8 @@ function homography(cv, fa, fb) {
   const n = src.length / 2;
   if (n < 25) return { inliers: n, H: null };
   const A = cv.matFromArray(n, 1, cv.CV_32FC2, src), B = cv.matFromArray(n, 1, cv.CV_32FC2, dst), mask = new cv.Mat();
-  const Hm = cv.findHomography(A, B, cv.RANSAC, 4 / Math.min(fa.s, fb.s), mask);
+  const method = (globalThis.__mkOpt?.est === 'ransac') ? cv.RANSAC : (cv.USAC_MAGSAC ?? cv.RANSAC); // MAGSAC++（新しい頑健推定）。無ければ RANSAC
+  const Hm = cv.findHomography(A, B, method, 4 / Math.min(fa.s, fb.s), mask);
   let inliers = 0;
   for (let i = 0; i < mask.rows; i++) if (mask.data[i]) inliers++;
   const H = Hm.rows === 3 ? Array.from(Hm.data64F) : null;
@@ -200,6 +201,25 @@ function refineEcc(cv, ref, mov) {
   } catch { /* 収束しないときはそのまま */ }
   A.delete(); B.delete(); W.delete(); none.delete();
   return out;
+}
+
+// 位置合わせのずれ（px）：版の線の点から、スキャンの線までの距離の中央値。小さいほど良い
+function alignError(cv, ref, scan) {
+  // 両方向で測る：版の線→スキャンの線、スキャンの線→版の線。薄いスキャンでも、ずれでなければ後者は小さい
+  const w = ref.width, h = ref.height, n = w * h;
+  const one = (from, to, thTo, thFrom) => {
+    const T = rgba(to), F = rgba(from);
+    const m = new cv.Mat(h, w, cv.CV_8UC1);
+    for (let i = 0, j = 0; j < n; i += 4, j++) m.data[j] = (T[i] + T[i + 1] + T[i + 2]) / 3 < thTo ? 0 : 255;
+    const dist = new cv.Mat();
+    cv.distanceTransform(m, dist, cv.DIST_L2, 3);
+    const d = [];
+    for (let j = 0; j < n; j += 7) { const i = j * 4; if ((F[i] + F[i + 1] + F[i + 2]) / 3 < thFrom && Math.abs(F[i] - F[i + 2]) < 40) d.push(dist.data32F[j]); }
+    m.delete(); dist.delete();
+    d.sort((x, y) => x - y);
+    return d.length ? Math.round(d[Math.floor(d.length / 2)] * 100) / 100 : null;
+  };
+  return { refToScan: one(ref, scan, 160, 100), scanToRef: one(scan, ref, 200, 100) };
 }
 
 // ---------- 文字の差（CAD どうし）：900→910 のような書き換えを拾う ----------
@@ -266,7 +286,7 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
   }
 
   // 反映（打合せ前→後の変化）
-  let diff = null, diffMain = null, diffColor = null;
+  let diff = null, diffMain = null, diffColor = null, diffRem = null, diffAdd = null, psAll = null;
   if (base && after) {
     const Bp = hsvg(rgba(base), n), Ap = hsvg(rgba(after), n);
     const pb = new Uint8Array(n), pa = new Uint8Array(n);
@@ -291,23 +311,28 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
     const hand7 = dilate(cv, hand, w, h, 7);
     for (let i = 0; i < n; i++) { ps[i] = S.G[i] < 150 && S.S[i] < 90 && !hand7[i] ? 255 : 0; pa[i] = Ap.G[i] < 150 && Ap.S[i] < 90 ? 255 : 0; }
     const ps7 = dilate(cv, ps, w, h, 7), pa7 = dilate(cv, pa, w, h, 7);
+    // 消えた線（スキャンにあって後の版にない）と増えた線（後の版にあってスキャンにない）を分ける。
+    // スキャンがかすれると「増えた線」だけが増えるので、それぞれページのふだんの差と比べる
+    psAll = ps; diffRem = new Uint8Array(n); diffAdd = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { if (ps[i] && !pa7[i]) diffRem[i] = 255; if (pa[i] && !ps7[i] && !hand7[i]) diffAdd[i] = 255; }
     diffMain = new Uint8Array(n);
-    for (let i = 0; i < n; i++) if ((ps[i] && !pa7[i]) || (pa[i] && !ps7[i] && !hand7[i])) diffMain[i] = 255;
+    for (let i = 0; i < n; i++) if (diffRem[i] || diffAdd[i]) diffMain[i] = 255;
   }
 
   // 書き込み1件ずつ
   const items = [], covered = new Uint8Array(n);
   // スキャンどうしの比べ（前の版なし）のときは、書き込みのない所の「普段の差」を基準にする
-  let noiseRate = 0;
-  if (diffMain && !diff) {
-    const T = 140; const rates = [];
+  let noiseRem = 0, noiseAdd = 0;
+  if (diffRem) {
+    const T = 140, rr = [], ra = [];
     const g = dilate(cv, hand, w, h, 41);
     for (let ty = 0; ty + T < h; ty += T) for (let tx = 0; tx + T < w; tx += T) {
       if (sumBox(g, w, tx, ty, tx + T, ty + T)) continue;
-      rates.push(sumBox(diffMain, w, tx, ty, tx + T, ty + T) / (T * T));
+      if (!sumBox(diffMain, w, tx, ty, tx + T, ty + T) && !sumBox(psAll, w, tx, ty, tx + T, ty + T)) continue; // 何も描いてない所は数えない
+      rr.push(sumBox(diffRem, w, tx, ty, tx + T, ty + T) / (T * T)); ra.push(sumBox(diffAdd, w, tx, ty, tx + T, ty + T) / (T * T));
     }
-    rates.sort((a, b) => a - b);
-    noiseRate = rates.length ? rates[Math.floor(rates.length * 0.75)] : 0.002;
+    const q = (a, f) => (a.sort((x, y) => x - y), a.length ? a[Math.floor(a.length * f)] : 0.002);
+    noiseRem = q(rr, 0.75); noiseAdd = q(ra, 0.75);
   }
   for (const gr of groups) {
     const { x, y } = gr, bw = gr.w, bh = gr.h;
@@ -327,18 +352,23 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
     const cx = (x + bw / 2) / w, cy = (y + bh / 2) / h;
     const corner = (cx < 0.12 || cx > 0.88) && (cy < 0.15 || cy > 0.85) && bw < 0.15 * w && bh < 0.2 * h;
     const memo = around < 0.012 || corner;
-    let judge = 'wait', change = 0;
+    let judge = 'wait', change = 0; const feat = {};
     if (diff) {
       change = sumBox(diffMain, w, x0, y0, x1, y1) + (isMarker ? sumBox(diffColor, w, x0, y0, x1, y1) : 0);
       judge = change > 40 ? 'ok' : 'ng';
-    } else if (diffMain) {
-      change = sumBox(diffMain, w, x0, y0, x1, y1);
-      const expect = noiseRate * (x1 - x0) * (y1 - y0);
-      judge = change > Math.max(40, expect * 2.2) ? 'ok' : 'ng';
+    } else if (diffRem) {
+      const area = (x1 - x0) * (y1 - y0), o = globalThis.__mkOpt || {};
+      const rem = sumBox(diffRem, w, x0, y0, x1, y1), add = sumBox(diffAdd, w, x0, y0, x1, y1);
+      const zr = rem / (noiseRem * area + 10), za = add / (noiseAdd * area + 10);
+      change = rem + add;
+      // 実物4物件で試した結果、スキャンと最新CADの線の差では反映を見分けられなかった（正答 20/39）。
+      // 当てにならない判定は出さず「確認待ち」にして、スキャン｜最新 を並べて見てもらう（参考の数値だけ残す）
+      judge = o.afterJudge ? (zr > (o.kr ?? 3) || za > (o.ka ?? 3) ? 'ok' : 'ng') : 'wait';
+      Object.assign(feat, { rem, add, zr: Math.round(zr * 100) / 100, za: Math.round(za * 100) / 100 });
     }
     if (memo) judge = judge === 'ok' ? 'ok' : 'memo';
     for (let yy = y0; yy < y1; yy++) covered.fill(1, yy * w + x0, yy * w + x1);
-    items.push({ box: [x0, y0, x1 - x0, y1 - y0], ink, change, judge, marker: isMarker, memo, words: wordsIn(tdiff, x0, y0, x1, y1) });
+    items.push({ box: [x0, y0, x1 - x0, y1 - y0], ink, change, judge, marker: isMarker, memo, words: wordsIn(tdiff, x0, y0, x1, y1), feat });
   }
   // 上から下、左から右の順に番号
   items.sort((a, b) => (Math.floor(a.box[1] / 200) - Math.floor(b.box[1] / 200)) || (a.box[0] - b.box[0]));
@@ -425,6 +455,7 @@ export async function analyze(cv, { scanPdf, basePdf, afterPdf, onProgress = () 
         scanW = timed('位置合わせ', () => warpCanvas(cv, sc.canvas, H, refC.width, refC.height));
         const M = timed('ECC', () => refineEcc(cv, refC, scanW));
         if (M) scanW = warpCanvas(cv, scanW, M, refC.width, refC.height, true);
+        page.alignErr = timed('ずれ測定', () => alignError(cv, refC, scanW));
         page.refPage = ref.page; page.refFile = ref.file;
         if (basePdf) baseC = refC; else afterC = refC;
         if (afters) {
