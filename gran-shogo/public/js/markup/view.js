@@ -23,7 +23,7 @@ export function showMarkup(c) {
       <div class="mode-body">
         <div class="mk-drops">
           ${drop('scan', 'SCAN', '手書きのスキャン', '必須：打合せで書き込んだ図面をスキャンしたPDF')}
-          ${drop('base', 'BEFORE', '打合せ前の版', 'おすすめ：打合せで使った図面の元のPDF（CAD出力）。黒ペンの書き込みも見分けられます')}
+          ${drop('base', 'BEFORE', '打合せ前の版', 'おすすめ：打合せで印刷した元のPDF（CAD出力）。どの版を印刷したか分からなければ候補を複数入れてください')}
           ${drop('after', 'AFTER', '打合せ後の版', '任意：修正したあとのPDF。入れると「反映されたか」を判定します')}
         </div>
         <p class="lead mk-lead">${modeNote()}</p>
@@ -34,7 +34,7 @@ export function showMarkup(c) {
       </div>
     </section>
     <div id="mk-result"></div>`;
-  for (const k of ['scan', 'base', 'after']) ctx.bindDrop(`#mk-drop-${k}`, `#mk-file-${k}`, files => { st.files[k] = files[0]; st.result = null; showMarkup(ctx); });
+  for (const k of ['scan', 'base', 'after']) ctx.bindDrop(`#mk-drop-${k}`, `#mk-file-${k}`, files => { st.files[k] = k === 'base' ? files : files[0]; st.result = null; showMarkup(ctx); });
   app.querySelector('#mk-run').onclick = run;
   const clr = app.querySelector('#mk-clear');
   if (clr) clr.onclick = () => { st.files = { scan: null, base: null, after: null }; st.result = null; showMarkup(ctx); };
@@ -42,16 +42,16 @@ export function showMarkup(c) {
 }
 
 function drop(k, en, label, sub) {
-  const f = st.files[k];
-  return `<label class="drop ${f ? 'filled' : ''}" id="mk-drop-${k}">
-    <input type="file" id="mk-file-${k}" accept=".pdf,application/pdf">
+  const f = st.files[k], names = Array.isArray(f) ? f.map(x => x.name) : f ? [f.name] : [];
+  return `<label class="drop ${names.length ? 'filled' : ''}" id="mk-drop-${k}">
+    <input type="file" id="mk-file-${k}" accept=".pdf,application/pdf" ${k === 'base' ? 'multiple' : ''}>
     <span class="k">${en}</span>
-    ${f ? `<span class="fname">${ctx.h(f.name)}</span><span>押すと選び直せます</span>` : `<b>${label}</b><span>${sub}</span>`}
+    ${names.length ? `<span class="fname">${names.map(n => ctx.h(n)).join('<br>')}</span><span>押すと選び直せます${k === 'base' && names.length > 1 ? '（ページごとに一番合う版を使います）' : ''}</span>` : `<b>${label}</b><span>${sub}</span>`}
   </label>`;
 }
 
 function modeNote() {
-  const { base, after } = st.files;
+  const { after } = st.files, base = st.files.base?.length;
   if (base && after) return '3つそろっています：手書きを見つけ、その場所で図面が変わったか（反映）と、書き込みのない所の変更（指示外の変更）まで確かめます。';
   if (after) return '打合せ後の版だけのとき：色ペンの書き込みを見つけ、スキャンと新しい版を比べて反映を判定します（参考。打合せ前の版があると確かになります）。';
   if (base) return '打合せ前の版だけのとき：色ペン・黒ペンの書き込みを見つけます。反映の判定には打合せ後の版を入れてください。';
@@ -67,10 +67,11 @@ async function run() {
     say('画像処理の部品を準備しています（初回は 10MB ほど読み込みます）', 0.02);
     const { cv } = await loadCv(ctx.cvSrc);
     const open = f => (f ? pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise : null);
-    const [scanPdf, basePdf, afterPdf] = await Promise.all([open(st.files.scan), open(st.files.base), open(st.files.after)]);
+    const baseFiles = st.files.base || [];
+    const [scanPdf, afterPdf, ...basePdf] = await Promise.all([open(st.files.scan), open(st.files.after), ...baseFiles.map(open)]);
     const t0 = performance.now();
     const result = await analyze(cv, { scanPdf, basePdf, afterPdf, onProgress: say });
-    result.names = { scan: st.files.scan.name, base: st.files.base?.name, after: st.files.after?.name };
+    result.names = { scan: st.files.scan.name, base: baseFiles.map(f => f.name).join('・') || null, bases: baseFiles.map(f => f.name), after: st.files.after?.name };
     result.sec = Math.round((performance.now() - t0) / 1000);
     st.result = result; st.filter = 'all';
     globalThis.__mkResult = result; // 動作確認用（中身はこのブラウザの中だけ）
@@ -217,7 +218,8 @@ function renderPage() {
     list.innerHTML = `<div class="card empty"><b>このページに合う図面のページが見つかりませんでした</b>表紙・仕様書・カタログなど図面でないページか、入れた版にないページです。書き込みは目で確認してください。</div>`;
     return;
   }
-  info.textContent = `p.${p.scanPage}${p.refPage ? ` → ${st.result.names.base ? '打合せ前' : '打合せ後'} p.${p.refPage}` : ''}${p.afterPage ? `／打合せ後 p.${p.afterPage}` : ''}`;
+  const bn = st.result.names.bases || [];
+  info.textContent = `p.${p.scanPage}${p.refPage ? ` → ${bn.length ? `打合せ前${bn.length > 1 ? `（${bn[p.refFile]}）` : ''}` : '打合せ後'} p.${p.refPage}` : ''}${p.afterPage ? `／打合せ後 p.${p.afterPage}` : ''}`;
   view.replaceChildren(p.view.canvas);
   p.view.canvas.onclick = ev => {
     const r = p.view.canvas.getBoundingClientRect(), k = p.view.canvas.width / r.width / p.view.scale;
@@ -238,6 +240,7 @@ function renderPage() {
       <div class="row1"><span class="mk-no" style="background:${j[2]}">${h(String(e.it.no))}</span>
         <div class="who"><div class="pname">p.${p.scanPage}　${e.judge === 'other' ? '指示外の変更' : `書き込み ${h(String(e.it.no))}`}</div><div class="paddr">${h(reason(e, mode))}</div></div>
         <span class="chip ${label[1]}">${label[0]}</span></div>
+      ${wordsLine(e.it.words)}
       <div class="mk-crops" data-id="${e.id}"></div>
       <div class="mk-act no-print">
         <button class="btn btn-sm ${m === 'done' ? 'on' : ''}" type="button" data-act="done" data-id="${e.id}">${m === 'done' ? '✓ 確認済み' : '確認済みにする'}</button>
@@ -263,6 +266,13 @@ function renderPage() {
     renderResult();
     window.scrollTo(0, y);
   });
+}
+
+// 周りで変わった文字（CAD の文字データから）
+function wordsLine(w) {
+  if (!w || (!w.gone.length && !w.came.length)) return '';
+  const { h } = ctx;
+  return `<div class="vals mk-words">変わった文字 ${w.gone.map(t => `<span class="del"><b>${h(t)}</b></span>`).join('')}${w.gone.length && w.came.length ? '<span>→</span>' : ''}${w.came.map(t => `<span class="hl"><b>${h(t)}</b></span>`).join('')}</div>`;
 }
 
 function reason(e, mode) {
