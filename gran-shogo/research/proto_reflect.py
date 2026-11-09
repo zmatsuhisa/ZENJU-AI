@@ -133,8 +133,18 @@ def main(scan_pdf, base_pdf, after_pdf, out):
             nn, ll, ss, _ = cv2.connectedComponentsWithStats(diff, connectivity=8)
             keep = np.zeros(nn, bool); keep[1:] = ss[1:, cv2.CC_STAT_AREA] >= 4
             diff = (keep[ll]).astype(np.uint8) * 255
+            # 黒い線・文字の変化（どの書き込みでも数える）と、色の線の変化（蛍光ペンの範囲指定のときだけ数える）に分ける
+            gb, ga = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY), cv2.cvtColor(after, cv2.COLOR_BGR2GRAY)
+            sb = cv2.cvtColor(base, cv2.COLOR_BGR2HSV)[..., 1]; sa = cv2.cvtColor(after, cv2.COLOR_BGR2HSV)[..., 1]
+            colored = ((sb > 60) | (sa > 60)) & ~((gb < 120) | (ga < 120))
+            diff_color = (diff > 0) & colored & (tdiff == 0)
+            diff_main = ((diff > 0) & ~diff_color).astype(np.uint8) * 255
+            diff_color = diff_color.astype(np.uint8) * 255
         else:
-            diff = np.zeros_like(hand)
+            diff = np.zeros_like(hand); diff_main = diff_color = diff
+        hsv_w = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
+        # 蛍光ペン：黄〜黄緑の、明るくて淡い太い塗り
+        marker = ((hsv_w[..., 0] >= 20) & (hsv_w[..., 0] <= 50) & (hsv_w[..., 1] > 60) & (hsv_w[..., 2] > 170) & (hand > 0)).astype(np.uint8)
         vis = cv2.addWeighted(after if after is not None else base, 0.5, np.full_like(base, 255), 0.5, 0)
         vis[diff > 0] = (220, 120, 40)
         vis[hand > 0] = (40, 150, 40)
@@ -149,9 +159,12 @@ def main(scan_pdf, base_pdf, after_pdf, out):
             ys, xs = np.nonzero(hb)
             if len(xs) and (np.ptp(ys) < 8 or np.ptp(xs) < 8):
                 continue
-            p = 60  # 矢印で少し離れた所を指すことが多いので広めに見る
+            p = int(__import__("os").environ.get("PAD", "60"))  # 書き込みの周りをどこまで見るか
             x0, y0, x1, y1 = max(0, x - p), max(0, y - p), min(w, x + bw + p), min(h, y + bh + p)
-            ch = int((diff[y0:y1, x0:x1] > 0).sum())
+            is_marker = int(marker[y:y + bh, x:x + bw].sum()) > 0.3 * ink
+            ch = int((diff_main[y0:y1, x0:x1] > 0).sum())
+            if is_marker:
+                ch += int((diff_color[y0:y1, x0:x1] > 0).sum())
             ok = ch > 25
             covered[y0:y1, x0:x1] = 255
             items.append({"no": len(items) + 1, "box": [int(x0), int(y0), int(x1 - x0), int(y1 - y0)], "ink": ink, "change_px": ch,
