@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PUB = ROOT / "public"
 PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build"
 XLSX = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs"
+OPENCV = "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js"
 SAMPLES = {
     "平面図_旧.pdf": "plan_old.pdf", "平面図_新.pdf": "plan_new.pdf", "建具表.xlsx": "tategu.xlsx",
     "仕上表.xlsx": "shiage.xlsx", "見積_旧.xlsx": "estimate_old.xlsx", "見積_新.xlsx": "estimate_new.xlsx",
@@ -46,6 +47,7 @@ def main(out: Path) -> None:
         f"pdfjs.GlobalWorkerOptions.workerSrc = '{PDFJS}/pdf.worker.min.mjs';\n"
         f"globalThis.pdfjsWorker ??= await import('{PDFJS}/pdf.worker.min.mjs');",
     )
+    app = replace_once(app, "const CV_SRC = new URL('../vendor/opencv.js', import.meta.url).href;", f"const CV_SRC = '{OPENCV}';")
     app = re.sub(r"const PDF_OPTS = \{.*?\};", "const PDF_OPTS = { useSystemFonts: true };", app, count=1)
     app = replace_once(
         app,
