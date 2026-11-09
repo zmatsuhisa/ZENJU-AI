@@ -208,7 +208,8 @@ function textDiffMask(wb, wa, HaToB, w, h) {
   m.words = [];
   const A = wa.map(t => { const [x, y] = HaToB ? applyH(HaToB, t.cx, t.cy) : [t.cx, t.cy]; return { ...t, cx: x, cy: y }; });
   const unmatched = (P, Q) => P.filter(p => !Q.some(q => q.s === p.s && Math.abs(q.cx - p.cx) < 8 && Math.abs(q.cy - p.cy) < 8));
-  for (const t of [...unmatched(wb, A), ...unmatched(A, wb)]) {
+  const gone = unmatched(wb, A).map(t => ({ ...t, side: '-' })), came = unmatched(A, wb).map(t => ({ ...t, side: '+' }));
+  for (const t of [...gone, ...came]) {
     m.words.push(t);
     const x0 = Math.max(0, Math.floor(t.cx - t.w / 2)), x1 = Math.min(w, Math.ceil(t.cx + t.w / 2));
     const y0 = Math.max(0, Math.floor(t.cy - t.h / 2)), y1 = Math.min(h, Math.ceil(t.cy + t.h / 2));
@@ -217,6 +218,15 @@ function textDiffMask(wb, wa, HaToB, w, h) {
   return m;
 }
 
+// 箱の中で消えた文字（-）・増えた文字（+）。日付は除く
+function wordsIn(tdiff, x0, y0, x1, y1) {
+  const ws = (tdiff?.words || []).filter(t => t.cx >= x0 && t.cx <= x1 && t.cy >= y0 && t.cy <= y1 && !/^\d{2,4}[/.]\d{1,2}[/.]\d{1,2}$/.test(t.s));
+  const set = side => new Set(ws.filter(t => t.side === side).map(t => t.s));
+  const g = set('-'), c = set('+');
+  // 両方にある文字は「動いただけ」なので出さない
+  const moved = [...g].filter(t => c.has(t));
+  return { gone: [...g].filter(t => !c.has(t)).slice(0, 6), came: [...c].filter(t => !g.has(t)).slice(0, 6), moved: moved.slice(0, 6) };
+}
 const sumBox = (arr, w, x0, y0, x1, y1) => { let c = 0; for (let y = y0; y < y1; y++) for (let x = x0, i = y * w + x0; x < x1; x++, i++) if (arr[i]) c++; return c; };
 
 // ---------- 1ページ分 ----------
@@ -328,7 +338,7 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
     }
     if (memo) judge = judge === 'ok' ? 'ok' : 'memo';
     for (let yy = y0; yy < y1; yy++) covered.fill(1, yy * w + x0, yy * w + x1);
-    items.push({ box: [x0, y0, x1 - x0, y1 - y0], ink, change, judge, marker: isMarker, memo });
+    items.push({ box: [x0, y0, x1 - x0, y1 - y0], ink, change, judge, marker: isMarker, memo, words: wordsIn(tdiff, x0, y0, x1, y1) });
   }
   // 上から下、左から右の順に番号
   items.sort((a, b) => (Math.floor(a.box[1] / 200) - Math.floor(b.box[1] / 200)) || (a.box[0] - b.box[0]));
@@ -337,8 +347,12 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
   // 指示外の変更
   const others = [];
   if (diff) {
+    // 変化のまとまりが書き込みの枠に少しでも触れていれば、その書き込みの反映とみなす（枠の境目ではみ出した分を指示外にしない）
     const d31 = dilate(cv, diff, w, h, 31);
-    for (let i = 0; i < n; i++) if (covered[i]) d31[i] = 0;
+    const all = components(cv, d31, w, h);
+    const touch = new Uint8Array(all.stats.length + 1);
+    for (let i = 0; i < n; i++) if (covered[i] && all.labels[i]) touch[all.labels[i]] = 1;
+    for (let i = 0; i < n; i++) if (covered[i] || touch[all.labels[i]]) d31[i] = 0;
     // 図面枠の日付（2026/10/26 → 2026/11/03）が変わっただけのところは数えない
     const dates = (tdiff?.words || []).filter(t => /^\d{2,4}[/.年]\d{1,2}[/.月]\d{1,2}日?$/.test(t.s));
     const onDate = (x, y) => dates.some(t => Math.abs(x - t.cx) < t.w / 2 + 6 && Math.abs(y - t.cy) < t.h / 2 + 6);
@@ -348,28 +362,33 @@ function analyzePage(cv, { scan, ref, refIsBase, base, after, tdiff }) {
         if (!diff[i]) continue;
         px++; if (!dates.length || !onDate(xx, yy)) notDate++;
       }
-      if (px >= 150 && notDate >= 60) others.push({ box: [s.x, s.y, s.w, s.h], change: px });
+      if (px >= 150 && notDate >= 60) others.push({ box: [s.x, s.y, s.w, s.h], change: px, words: wordsIn(tdiff, s.x, s.y, s.x + s.w, s.y + s.h) });
     }
   }
   return { items, others, hand };
 }
 
 // ---------- 全体 ----------
-// scanPdf: 手書きスキャン、basePdf: 打合せ前の版（任意）、afterPdf: 打合せ後の版（任意）
+// scanPdf: 手書きスキャン、basePdf: 打合せ前の版（任意。どれを印刷したか分からないときは候補を配列で。ページごとに一番合う版を使う）、
+// afterPdf: 打合せ後の版（任意）
 export async function analyze(cv, { scanPdf, basePdf, afterPdf, onProgress = () => {} }) {
-  const refPdf = basePdf || afterPdf;
+  const bases = (Array.isArray(basePdf) ? basePdf : [basePdf]).filter(Boolean);
+  basePdf = bases.length ? bases : null;
   const say = (t, r) => { onProgress(t, r); if (globalThis.__mkDebug) console.log(Math.round(performance.now()), t, JSON.stringify(prof)); return pause(); };
-  const pagesOf = async (pdf, label) => {
+  const pagesOf = async (pdf, label, file = 0) => {
     const out = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       await say(`${label}の ${i}/${pdf.numPages} ページを読み込み中`, 0);
       const r = await renderPdfPage(pdf, i);
+      r.file = file;
       r.f = timed('特徴点', () => features(cv, r.canvas, PAIR_LONG, 3000));
       out.push(r);
     }
     return out;
   };
-  const refs = refPdf ? await pagesOf(refPdf, basePdf ? '打合せ前の版' : '打合せ後の版') : [];
+  const refs = [];
+  if (basePdf) for (const [k, b] of bases.entries()) refs.push(...await pagesOf(b, bases.length > 1 ? `打合せ前の版（候補${k + 1}）` : '打合せ前の版', k));
+  else if (afterPdf) refs.push(...await pagesOf(afterPdf, '打合せ後の版'));
   const afters = basePdf && afterPdf ? await pagesOf(afterPdf, '打合せ後の版') : null;
   const result = { pages: [], mode: basePdf && afterPdf ? 'trio' : afterPdf ? 'after' : basePdf ? 'base' : 'scan' };
   try {
@@ -406,7 +425,7 @@ export async function analyze(cv, { scanPdf, basePdf, afterPdf, onProgress = () 
         scanW = timed('位置合わせ', () => warpCanvas(cv, sc.canvas, H, refC.width, refC.height));
         const M = timed('ECC', () => refineEcc(cv, refC, scanW));
         if (M) scanW = warpCanvas(cv, scanW, M, refC.width, refC.height, true);
-        page.refPage = ref.page;
+        page.refPage = ref.page; page.refFile = ref.file;
         if (basePdf) baseC = refC; else afterC = refC;
         if (afters) {
           let ab = { inliers: 0 };
