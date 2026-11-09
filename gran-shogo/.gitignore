@@ -2,3 +2,4 @@ node_modules/
 public/vendor/
 data/
 .env
+dist-artifact/
