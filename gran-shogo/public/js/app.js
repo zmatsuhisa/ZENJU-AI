@@ -1,4 +1,5 @@
-// 資料照合の画面。#/（照合する）・#/run/<id>（結果）・#/item/<id>/<指摘>（詳細）・#/history（記録）
+// 資料照合の画面。#check（照合する）・#run-<id>（結果）・#item-<id>-<指摘>（詳細）・#history（記録）
+// claude.ai の Artifact でも動くよう、画面の切り替えは「#英数字」だけで表す
 import * as pdfjs from '../vendor/pdf.min.mjs';
 import * as XLSX from '../vendor/xlsx.mjs';
 import { readPdf, readXlsx } from './core/readers.js';
@@ -23,13 +24,66 @@ const state = {
 };
 
 // ---------- 起動 ----------
-fetch('api/config').then(r => r.json()).then(c => { state.config = c; route(); }).catch(() => route());
+// サーバー（server.js）があれば記録はサーバーへ。無ければ（claude.ai の Artifact など）このブラウザの中に残す
+let LOCAL = false;
+fetch('api/config')
+  .then(r => (r.ok ? r.json() : Promise.reject(new Error('no server'))))
+  .then(c => { if (!c || !c.version) throw new Error('no server'); state.config = c; })
+  .catch(() => { LOCAL = true; state.config = { ai: false, local: true }; })
+  .finally(route);
 window.addEventListener('hashchange', route);
 
+const api = {
+  async list() {
+    if (!LOCAL) return (await fetch('api/runs')).json();
+    return localRuns().map(({ findings, ...r }) => ({ ...r, counts: countOf(findings, r.confirmed) }));
+  },
+  async get(id) {
+    if (!LOCAL) { const r = await fetch('api/runs/' + id); if (!r.ok) throw new Error('記録が見つかりません'); return r.json(); }
+    const r = localRuns().find(x => x.id === id);
+    if (!r) throw new Error('記録が見つかりません（このブラウザに残っていません）');
+    return structuredClone(r);
+  },
+  async save(run) {
+    if (!LOCAL) {
+      const r = await fetch('api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(run) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || '記録できませんでした'); return j.id;
+    }
+    const id = Math.random().toString(16).slice(2, 10);
+    const runs = localRuns();
+    runs.unshift({ id, at: new Date().toISOString(), ...run, confirmed: {} });
+    localSave(runs.slice(0, 50));
+    return id;
+  },
+  async patch(id, body) {
+    if (!LOCAL) {
+      const r = await fetch(`api/runs/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || '保存できませんでした'); return j.confirmed;
+    }
+    const runs = localRuns(); const r = runs.find(x => x.id === id);
+    if (!r) throw new Error('記録が見つかりません');
+    if (body.confirmed) r.confirmed[body.findingId] = { at: new Date().toISOString(), note: String(body.note || '').slice(0, 500) };
+    else delete r.confirmed[body.findingId];
+    localSave(runs);
+    return r.confirmed;
+  },
+};
+const memRuns = [];
+function localRuns() { try { const s = localStorage.getItem('gran-shogo:runs'); if (s) return JSON.parse(s); } catch { /* 使えない環境ではメモリだけ */ } return memRuns; }
+function localSave(runs) { memRuns.splice(0, memRuns.length, ...runs); try { localStorage.setItem('gran-shogo:runs', JSON.stringify(runs)); } catch { /* 容量オーバーなど。メモリには残る */ } }
+function countOf(findings = [], confirmed = {}) {
+  const c = { ng: 0, check: 0, change: 0, done: 0, total: findings.length };
+  for (const f of findings) {
+    if (confirmed[f.id]) c.done++; else if (f.severity === 'ng') c.ng++; else if (f.severity === 'check') c.check++; else c.change++;
+  }
+  return c;
+}
+
 function route() {
-  const hash = location.hash || '#/';
-  const m = hash.match(/^#\/(\w+)?\/?([\w-]+)?\/?([\w-]+)?/) || [];
-  const page = m[1] || '';
+  // #check / #result / #history / #run-<記録> / #item-<記録>-<指摘>
+  const hash = location.hash || '#check';
+  const m = hash.match(/^#(\w+)(?:-(\w+))?(?:-(\w+))?/) || [];
+  const page = m[1] === 'check' ? '' : (m[1] || '');
   document.querySelectorAll('.nav a').forEach(a => {
     const on = a.dataset.nav === ({ '': 'check', run: 'result', result: 'result', item: 'result', history: 'history' }[page]);
     a.classList.toggle('active', on);
@@ -38,7 +92,7 @@ function route() {
   $('#menu-button').hidden = !['run', 'result', 'item'].includes(page);
   if (page === 'run' && m[2]) return showRun(m[2]);
   if (page === 'item' && m[2] && m[3]) return showItem(m[2], m[3]);
-  if (page === 'result') return state.run ? (location.hash = `#/run/${state.run.id}`) : showLatest();
+  if (page === 'result') return state.run ? (location.hash = `#run-${state.run.id}`) : showLatest();
   if (page === 'history') return showHistory();
   return showCheck();
 }
@@ -72,12 +126,12 @@ function showCheck() {
           <ul class="files" id="files">${state.multi.map(fileRow).join('')}</ul>
           <label class="opt"><input type="checkbox" id="use-ai" ${state.useAi && ai ? 'checked' : ''} ${ai ? '' : 'disabled'}>
             <span>AIでも照合する（仕様の反映漏れなど、記号だけでは分からない食い違い）
-            <span class="muted">${ai ? '資料の文字を Anthropic社の Claude に送ります。施主名・金額を含む資料は社内の決まりを確認してから。1〜3分かかります。' : 'AI照合は未設定です（サーバーの .env に ANTHROPIC_API_KEY を入れると使えます）。'}</span></span></label>
+            <span class="muted">${ai ? '資料の文字を Anthropic社の Claude に送ります。施主名・金額を含む資料は社内の決まりを確認してから。1〜3分かかります。' : state.config.local ? 'AI照合は社内PCのサーバー版（start.bat）で使えます。この画面ではルール照合だけ動きます。' : 'AI照合は未設定です（サーバーの .env に ANTHROPIC_API_KEY を入れると使えます）。'}</span></span></label>
           <div class="actions"><button class="btn-primary" id="run-multi" type="button">食い違いを探す</button><span class="small muted" id="multi-msg"></span></div>
         </div>
       </section>
     </div>
-    <p class="hint">はじめての方は <a href="#/" id="try-sample">架空のサンプル資料で試す</a>（平面図・建具表・仕上表・見積に、食い違いを4つ仕込んであります）</p>`;
+    <p class="hint">はじめての方は <a href="#check" id="try-sample">架空のサンプル資料で試す</a>（平面図・建具表・仕上表・見積に、食い違いを4つ仕込んであります）</p>`;
 
   for (const side of ['old', 'new']) bindDrop(`#drop-${side}`, `#file-${side}`, files => { state.pair[side] = files[0]; showCheck(); });
   bindDrop('#drop-multi', '#file-multi', files => { addMulti(files); showCheck(); });
@@ -125,8 +179,18 @@ function addMulti(files) {
   }
 }
 
+// サンプル資料の配信名（どの環境でも通るよう英数字の名前で置く。server.js も同じ表を持つ）
+const SAMPLES = {
+  '平面図_旧.pdf': 'plan_old.pdf', '平面図_新.pdf': 'plan_new.pdf', '建具表.xlsx': 'tategu.xlsx',
+  '仕上表.xlsx': 'shiage.xlsx', '見積_旧.xlsx': 'estimate_old.xlsx', '見積_新.xlsx': 'estimate_new.xlsx',
+};
+
 async function loadSamples() {
-  const get = async n => ({ name: n, buf: await (await fetch('samples/' + encodeURIComponent(n))).arrayBuffer() });
+  const get = async n => {
+    const r = await fetch('samples/' + SAMPLES[n]);
+    if (!r.ok) throw new Error(n);
+    return { name: n, buf: await r.arrayBuffer() };
+  };
   try {
     const [o, n, t, s, e] = await Promise.all(['平面図_旧.pdf', '平面図_新.pdf', '建具表.xlsx', '仕上表.xlsx', '見積_新.xlsx'].map(get));
     state.pair = { old: o, new: n };
@@ -203,27 +267,23 @@ function compact(d) {
 }
 
 async function saveRun(run) {
-  const r = await fetch('api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(run) });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || '記録できませんでした');
-  state.session.runId = j.id;
+  const id = await api.save(run);
+  state.session.runId = id;
   state.filter = 'all'; state.q = '';
-  location.hash = `#/run/${j.id}`;
+  location.hash = `#run-${id}`;
 }
 
 // ---------- 照合結果 ----------
 async function fetchRun(id) {
   if (state.run?.id === id) return state.run;
-  const r = await fetch('api/runs/' + id);
-  if (!r.ok) throw new Error('記録が見つかりません');
-  state.run = await r.json();
+  state.run = await api.get(id);
   return state.run;
 }
 
 async function showLatest() {
-  const list = await (await fetch('api/runs')).json();
-  if (list.length) location.hash = `#/run/${list[0].id}`;
-  else { app.innerHTML = phead('Result', '照合結果', 'まだ照合していません。') + `<div class="card empty"><b>結果はまだありません</b><a href="#/">資料を照合する</a></div>`; setSync(); }
+  const list = await api.list();
+  if (list.length) location.hash = `#run-${list[0].id}`;
+  else { app.innerHTML = phead('Result', '照合結果', 'まだ照合していません。') + `<div class="card empty"><b>結果はまだありません</b><a href="#check">資料を照合する</a></div>`; setSync(); }
 }
 
 const SEV = { ng: 0, check: 1, change: 2, info: 3 };
@@ -237,7 +297,7 @@ const CHIP = {
 
 async function showRun(id) {
   let run;
-  try { run = await fetchRun(id); } catch (e) { app.innerHTML = `<div class="card empty"><b>${h(e.message)}</b><a href="#/history">記録を見る</a></div>`; return; }
+  try { run = await fetchRun(id); } catch (e) { app.innerHTML = `<div class="card empty"><b>${h(e.message)}</b><a href="#history">記録を見る</a></div>`; return; }
   const c = { ng: 0, check: 0, change: 0, done: 0 };
   run.findings.forEach(f => c[stateOf(f, run)]++);
   const isPair = run.mode === 'pair';
@@ -253,15 +313,15 @@ async function showRun(id) {
       ${stat('done', '確認済み', c.done, '件', `全${run.findings.length}件のうち`)}
     </section>
     <div class="tools no-print">
-      <button class="btn btn-sm" id="csv" type="button">CSVで書き出す</button>
-      <button class="btn btn-sm" id="print" type="button">報告書を印刷</button>
-      <a class="btn btn-sm" href="#/">別の資料を照合する</a>
+      <button class="btn btn-sm" id="csv" type="button">${LOCAL ? 'CSVをコピー' : 'CSVで書き出す'}</button>
+      ${LOCAL ? '' : '<button class="btn btn-sm" id="print" type="button">報告書を印刷</button>'}
+      <a class="btn btn-sm" href="#check">別の資料を照合する</a>
     </div>
     <div id="overlay-slot"></div>
     <div id="list"></div>`;
   app.querySelectorAll('.summary .stat').forEach(b => b.onclick = () => { state.filter = state.filter === b.dataset.f ? 'all' : b.dataset.f; syncSeg(); renderList(); markStats(); });
   $('#csv').onclick = () => downloadCsv(run);
-  $('#print').onclick = () => window.print();
+  if ($('#print')) $('#print').onclick = () => window.print();
   markStats();
   renderList();
   setSync(run.at);
@@ -296,7 +356,7 @@ function renderList() {
   const list = visible(run);
   if (!run.findings.length) { el.innerHTML = `<div class="card empty"><b>食い違い・変更は見つかりませんでした</b>読み取れた文字の範囲での結果です。スキャンしたPDF（画像だけのPDF）は文字を読めません。</div>`; return; }
   if (!list.length) { el.innerHTML = `<div class="card empty"><b>条件に合う指摘はありません</b>表示設定の絞り込みを外してください。</div>`; return; }
-  const link = f => `#/item/${run.id}/${f.id}`;
+  const link = f => `#item-${run.id}-${f.id}`;
   if (state.view === 'card') {
     el.innerHTML = '<div class="pgrid">' + list.map(f => {
       const st = stateOf(f, run);
@@ -366,11 +426,11 @@ async function showItem(runId, fid) {
   let run;
   try { run = await fetchRun(runId); } catch (e) { app.innerHTML = `<div class="card empty"><b>${h(e.message)}</b></div>`; return; }
   const f = run.findings.find(x => x.id === fid);
-  if (!f) { app.innerHTML = `<a class="back" href="#/run/${runId}">← 照合結果へ</a><div class="card empty"><b>指摘が見つかりません</b></div>`; return; }
+  if (!f) { app.innerHTML = `<a class="back" href="#run-${runId}">← 照合結果へ</a><div class="card empty"><b>指摘が見つかりません</b></div>`; return; }
   const st = stateOf(f, run);
   const conf = run.confirmed[f.id];
   app.innerHTML = `
-    <a class="back" href="#/run/${runId}">← 照合結果へ</a>
+    <a class="back" href="#run-${runId}">← 照合結果へ</a>
     <div class="card flowhead">
       <div class="row1"><h1>${h(f.title)}</h1><span class="chip ${f.source === 'ai' && st !== 'done' ? 'chip-blue' : CHIP[st][1]}" style="margin-left:auto">${f.source === 'ai' ? 'AI・' : ''}${CHIP[st][0]}</span></div>
       <div class="small muted">${h(f.category)}　${h(f.key || '')}${f.name ? '　' + h(f.name) : ''}　／　${{ rule: 'ルール照合', diff: '新旧比較', ai: 'AI照合' }[f.source] || ''}</div>
@@ -404,34 +464,31 @@ function nextLink(run, f) {
   const list = visible(run);
   const i = list.findIndex(x => x.id === f.id);
   const next = list[i + 1];
-  return next ? `<a class="btn" href="#/item/${run.id}/${next.id}">次の指摘へ</a>` : '';
+  return next ? `<a class="btn" href="#item-${run.id}-${next.id}">次の指摘へ</a>` : '';
 }
 
 async function setConfirmed(run, f, confirmed, note = '') {
-  const r = await fetch(`api/runs/${run.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ findingId: f.id, confirmed, note }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) return toast(j.error || '保存できませんでした');
-  run.confirmed = j.confirmed;
+  try { run.confirmed = await api.patch(run.id, { findingId: f.id, confirmed, note }); } catch (e) { return toast(e.message); }
   toast(confirmed ? '確認済みにしました' : '確認済みを取り消しました');
   showItem(run.id, f.id);
 }
 
 // ---------- 記録 ----------
 async function showHistory() {
-  const list = await (await fetch('api/runs')).json().catch(() => []);
+  const list = await api.list().catch(() => []);
   const open = list.reduce((n, r) => n + r.counts.ng + r.counts.check, 0);
   app.innerHTML = `
-    ${phead('History', '照合の記録', '照合した資料の名前と指摘、確認済みの印を残しています。資料ファイル自体は保存していません。')}
+    ${phead('History', '照合の記録', `照合した資料の名前と指摘、確認済みの印を${LOCAL ? 'このブラウザの中に' : ''}残しています。資料ファイル自体は保存していません。`)}
     <section class="summary" aria-label="集計">
       ${stat('x', '記録', list.length, '件', '照合した回数')}
       ${stat('x', '未確認', open, '件', '不一致と要確認のうち確認前', open > 0 ? 'alert' : '')}
     </section>
     ${list.length ? `<div class="card plist"><table><thead><tr><th>照合した資料</th><th>日時</th><th>方法</th><th>指摘</th></tr></thead><tbody>${list.map(r => `
-      <tr class="row" data-href="#/run/${r.id}"><td><div class="pname"><a href="#/run/${r.id}">${h(r.title)}</a></div><div class="paddr">${h(r.docs.map(d => d.name).join('・'))}</div></td>
+      <tr class="row" data-href="#run-${r.id}"><td><div class="pname"><a href="#run-${r.id}">${h(r.title)}</a></div><div class="paddr">${h(r.docs.map(d => d.name).join('・'))}</div></td>
       <td data-l="日時"><b class="num">${fmtTime(r.at)}</b></td>
       <td data-l="方法"><span>${r.mode === 'pair' ? '新旧比較' : '資料間の照合'}${r.ai && !r.ai.error ? '＋AI' : ''}</span></td>
       <td data-l="指摘"><span>${r.counts.ng ? `<span class="chip chip-red">不一致 ${r.counts.ng}</span> ` : ''}${r.counts.check ? `<span class="chip chip-gray">要確認 ${r.counts.check}</span> ` : ''}${r.counts.change ? `<span class="chip chip-orange">変更 ${r.counts.change}</span> ` : ''}${r.counts.done ? `<span class="chip chip-green">確認済み ${r.counts.done}</span>` : ''}${!r.counts.total ? '<span class="muted">なし</span>' : ''}</span></td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="card empty"><b>記録はまだありません</b><a href="#/">資料を照合する</a></div>`}`;
+      </tbody></table></div>` : `<div class="card empty"><b>記録はまだありません</b><a href="#check">資料を照合する</a></div>`}`;
   app.querySelectorAll('tr.row').forEach(tr => tr.onclick = e => { if (!e.target.closest('a')) location.hash = tr.dataset.href; });
   app.querySelectorAll('.summary .stat').forEach(b => { b.disabled = true; b.style.cursor = 'default'; });
   setSync(list[0]?.at);
@@ -451,7 +508,16 @@ function downloadCsv(run) {
     r.push(run.confirmed[f.id] ? fmtTime(run.confirmed[f.id].at) : '', run.confirmed[f.id]?.note || '');
     rows.push(r);
   });
-  const csv = '﻿' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const body = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  if (LOCAL) {
+    // Artifact の中ではファイルを保存できないので、クリップボードへ（Excel に貼り付けられる形）
+    const tsv = rows.map(r => r.map(v => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+    navigator.clipboard.writeText(tsv)
+      .then(() => toast('コピーしました。Excel に貼り付けてください'))
+      .catch(() => toast('コピーできませんでした。サーバー版（start.bat）では CSV で書き出せます'));
+    return;
+  }
+  const csv = '﻿' + body;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = `照合結果_${run.at.slice(0, 10)}_${run.title.replace(/[\\/:*?"<>|]/g, '').slice(0, 40)}.csv`;
