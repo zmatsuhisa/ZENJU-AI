@@ -116,5 +116,7 @@ public/js/markup/   書き込みの洗い出し（engine.js＝画像処理、vie
 public/js/core/      照合エンジン（ブラウザとテストで共通）
 samples/             架空のサンプル資料と作り方（make_samples.py）
 test/                npm test
+research/            MARKUP の実験メモ・正解表（truth.json）・採点（e2e/）
+HANDOFF.md           引き継ぎ書（課題の一覧と精度の測り方）
 data/runs.json       照合の記録（git に入れない）
 ```

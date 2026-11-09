@@ -1,21 +1,24 @@
-# ブラウザ版の結果（<case>/web.json）を、試作の正解ラベル（label/truth.json）で採点する
-import json, sys
-t = json.load(open('label/truth.json')); pref = {'hino': 'hi', 'oribe': 'or', 'senda': 'se', 'numata': 'nu'}
+# MARKUP の結果（<DATA>/<記号>/web.json）を正解表（research/truth.json）で採点する
+# 使い方: python3 score_web.py <DATA>
+import json, sys, pathlib
+HERE = pathlib.Path(__file__).resolve().parent
+DATA = pathlib.Path(sys.argv[1])
+t = json.load(open(HERE.parent / 'truth.json', encoding='utf-8'))
 J = {'ok': 'R', 'ng': 'N', 'memo': 'M', 'wait': '?'}
 ok = n = fr = fn = 0; bad = []; mm = [0, 0]; miss = []
-for case in pref:
-    rep = json.load(open(f'{case}/web.json'))
-    base = json.load(open(f'{case}/out/report.json'))
+for case in ['hi', 'or', 'se', 'nu']:
+    rep = json.load(open(DATA / case / 'web.json'))
+    # 正解表の番号は、試作で拾った書き込みの箱（labels/<記号>_boxes.json）に付いている。箱の中心で今の結果と突き合わせる
+    base = json.load(open(HERE / 'labels' / f'{case}_boxes.json'))
     for pb in base:
         pr = [p for p in rep if p['p'] == pb['scan_page']]
         if not pr: continue
-        for ib in pb.get('items', []):
-            k = f"{pref[case]}{pb['scan_page']}-{ib['no']}"; tr = t.get(k, ['?'])[0]
+        for ib in pb['items']:
+            k = f"{case}{pb['scan_page']}-{ib['no']}"; tr = t.get(k, ['?'])[0]
             bx, by, bw, bh = ib['box']; cx, cy = bx + bw / 2, by + bh / 2
-            # 正解の書き込みの中心を含む箱（なければ一番近い箱）
             cand = [i for i in pr[0]['items'] if i['box'][0] <= cx <= i['box'][0] + i['box'][2] and i['box'][1] <= cy <= i['box'][1] + i['box'][3]]
-            best = min(cand or pr[0]['items'], key=lambda i: (i['box'][0] + i['box'][2] / 2 - cx) ** 2 + (i['box'][1] + i['box'][3] / 2 - cy) ** 2, default=None)
-            if best is None or not cand:
+            best = min(cand, key=lambda i: (i['box'][0] + i['box'][2] / 2 - cx) ** 2 + (i['box'][1] + i['box'][3] / 2 - cy) ** 2, default=None)
+            if best is None:
                 if tr in 'RN': miss.append(k)
                 continue
             p = J[best['judge']]
