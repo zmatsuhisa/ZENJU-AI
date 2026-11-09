@@ -3,6 +3,7 @@
 //  - Excel：記号・品番の列で行を合わせてからセルを比べる（行の挿入・削除で全部ずれて見えるのを防ぐ）
 import { norm, keyOf, toNumber, editDistance } from './normalize.js';
 import { findHeaderRow } from './readers.js';
+import { blockShifts } from './shift.js';
 
 const NEAR = 40; // PDF上で「同じ場所」とみなす距離（pt。A3図面で約14mm）
 
@@ -18,6 +19,9 @@ export function diffPdf(oldDoc, newDoc) {
     const sa = 1, sb = a.width / b.width || 1;
     const A = a.chunks.map((c, k) => ({ ...c, k, X: c.x * sa, Y: c.y * sa, used: false }));
     const B = b.chunks.map((c, k) => ({ ...c, k, X: c.x * sb, Y: c.y * sb, used: false }));
+    // 図がまとまって動いた分（平面図ごと下へ動いた、など）は「移動」に数えない
+    const shifts = blockShifts(A.map(c => ({ text: c.text, x: c.X, y: c.Y })), B.map(c => ({ text: c.text, x: c.X, y: c.Y })));
+    const dist = (p, q) => Math.min(...shifts.map(s => Math.hypot(q.X - s.dx - p.X, q.Y - s.dy - p.Y)));
     // 1) 同じ文字で一番近いもの同士を対応づける
     const byText = new Map();
     for (const c of B) { if (!byText.has(c.text)) byText.set(c.text, []); byText.get(c.text).push(c); }
@@ -48,8 +52,6 @@ export function diffPdf(oldDoc, newDoc) {
   }
   return out;
 }
-
-const dist = (p, q) => Math.hypot(p.X - q.X, p.Y - q.Y);
 
 // 「W1600」と「W1650」、「AA-101」と「AA-102」のように、型が同じで中身が少し違うもの
 function similar(a, b) {

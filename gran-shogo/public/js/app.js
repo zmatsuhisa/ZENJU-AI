@@ -454,8 +454,8 @@ async function goPage(p) {
     $('#ov').classList.add('loading');
     const [pa, pb] = ov.docs;
     const width = 1800;
-    const [{ canvas: ca }, { canvas: cb, scale }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), width), renderPage(pb, Math.min(p, pb.numPages), width)]);
-    const { canvas, boxes, shift } = compose(ca, cb);
+    const [{ canvas: ca, words: wa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), width), renderPage(pb, Math.min(p, pb.numPages), width)]);
+    const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb });
     // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
     const ctx = canvas.getContext('2d');
     ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
@@ -464,7 +464,7 @@ async function goPage(p) {
       const { x, y, w, h: hh } = f.at;
       ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
     }
-    ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift });
+    ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved });
     // 大きな画像なので、近くの数ページ分だけ残す
     for (const k of ov.cache.keys()) if (Math.abs(k - p) > 2) ov.cache.delete(k);
     ov.counts[p] = boxes.length + textBoxes.length; // 描けたら、線と文字の違いを合わせた件数にする
@@ -474,23 +474,31 @@ async function goPage(p) {
   const c = ov.cache.get(p);
   $('#ov').replaceChildren(c.views[ov.mode]);
   $('#ov').scrollTop = 0;
-  prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}ページ　` : ''}線の違い ${c.lines}か所・文字の違い ${c.text}か所${c.shift.dx || c.shift.dy ? `（位置ずれ ${c.shift.dx}, ${c.shift.dy}px を補正）` : ''}`;
+  prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}ページ　` : ''}線の違い ${c.lines}か所・文字の違い ${c.text}か所${shiftNote(c)}`;
   renderStrip();
   // 次のページを先に描いておく（押したらすぐ出るように）
   if (p < ov.pages && !ov.cache.has(p + 1)) setTimeout(() => { if (ov.page === p && my === ov.seq) prefetch(p + 1); }, 300);
 }
 
+// 位置合わせの説明（図が動いただけの場所は、変更として数えていない）
+function shiftNote(c) {
+  const parts = [];
+  if (c.shift.dx || c.shift.dy) parts.push(`全体の位置ずれ ${c.shift.dx}, ${c.shift.dy}px`);
+  if (c.moved) parts.push(`用紙の中で動いた図 ${c.moved}か所`);
+  return parts.length ? `（${parts.join('・')}を合わせて比較）` : '';
+}
+
 async function prefetch(p) {
   if (!ov.docs || ov.cache.has(p)) return;
   const [pa, pb] = ov.docs;
-  const [{ canvas: ca }, { canvas: cb, scale }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), 1800), renderPage(pb, Math.min(p, pb.numPages), 1800)]);
+  const [{ canvas: ca, words: wa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), 1800), renderPage(pb, Math.min(p, pb.numPages), 1800)]);
   if (ov.cache.has(p)) return;
-  const { canvas, boxes, shift } = compose(ca, cb);
+  const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb });
   const ctx = canvas.getContext('2d');
   ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
   const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === p);
   for (const f of textBoxes) { const { x, y, w, h: hh } = f.at; ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale); }
-  ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift });
+  ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved });
   ov.counts[p] = boxes.length + textBoxes.length;
   renderStrip();
 }

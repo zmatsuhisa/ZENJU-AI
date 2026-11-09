@@ -43,7 +43,7 @@ AI照合は `.env` に `ANTHROPIC_API_KEY` を入れたときだけ選べます�
 | 参考にしたもの | 取り込んだこと | このアプリでの場所 |
 |---|---|---|
 | Diffchecker / Adobe Acrobat / pdf-diff | 文字の追加・削除・変更を色分け | 新旧比較（PDF）`core/diff.js` `diffPdf` |
-| diff-pdf / MIIDEL / Bluebeam Revu | 新旧図面を重ねて色分け、**位置ずれの補正**、変更箇所を枠で囲む | 図面の重ね合わせ `overlay.js` |
+| diff-pdf / MIIDEL / Bluebeam Revu | 新旧図面を重ねて色分け、**位置ずれの補正**、変更箇所を枠で囲む | 図面の重ね合わせ `overlay.js`（図の一部だけが用紙の中で動いた場合も、場所ごとにずれを合わせる。`core/shift.js`） |
 | Microsoft Spreadsheet Compare / xlsxDiff | セルの値と**数式**の違い、行・シートの追加削除 | 新旧比較（Excel）`diffXlsx` |
 | daff | **記号・品番の列で行を合わせてから**比べる（行が1つずれても全部が差分にならない） | `alignByKey` |
 | pdfplumber / Docling | 文字を**位置つき**で取り出し、表を構造化 | `core/readers.js` |
@@ -111,7 +111,7 @@ public/index.html    画面（グランOS ひな形 v2.1 の骨組み）
 public/gran-os-base.css  基本CSS v2.0（本家と同じ。値を変えない）
 public/app.css       このアプリだけの部品
 public/js/app.js     画面の動き
-public/js/overlay.js 図面の重ね合わせ
+public/js/overlay.js 図面の重ね合わせ（場所ごとの位置合わせ）
 public/js/markup/   書き込みの洗い出し（engine.js＝画像処理、view.js＝画面）
 public/js/core/      照合エンジン（ブラウザとテストで共通）
 samples/             架空のサンプル資料と作り方（make_samples.py）
