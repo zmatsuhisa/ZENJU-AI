@@ -66,7 +66,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/runs' && req.method === 'POST') {
       const run = JSON.parse(await body(req, 20_000_000));
       const rec = { id: randomUUID().slice(0, 8), at: new Date().toISOString(), mode: run.mode, title: String(run.title || '').slice(0, 120),
-        docs: (run.docs || []).map(d => ({ name: String(d.name).slice(0, 200), role: d.role })), findings: run.findings || [], ai: run.ai || null, confirmed: {} };
+        docs: (run.docs || []).map(d => ({ name: String(d.name).slice(0, 200), role: d.role })), findings: run.findings || [], ai: run.ai || null, pagemap: cleanPagemap(run.pagemap), confirmed: {} };
       const runs = readRuns();
       runs.unshift(rec);
       writeRuns(runs.slice(0, 300));
@@ -198,3 +198,16 @@ document.getElementById('f').onsubmit = async (ev) => {
 };
 </script>
 </body></html>`;
+
+// 新旧比較のページの対応（数と図面名だけを残す）
+function cleanPagemap(pm) {
+  if (!pm || !Array.isArray(pm.pairs)) return null;
+  const num = v => (Number.isInteger(v) && v > 0 && v < 10000 ? v : null);
+  const titles = o => Object.fromEntries(Object.entries(o || {}).filter(([k]) => num(Number(k))).map(([k, v]) => [k, String(v).slice(0, 40)]));
+  return {
+    pairs: pm.pairs.filter(p => num(p.a) && num(p.b)).map(p => ({ a: p.a, b: p.b, by: String(p.by || '').slice(0, 10), title: String(p.title || '').slice(0, 40), score: Number(p.score) || 0,
+      ...(Array.isArray(p.H) && p.H.length === 9 && p.H.every(Number.isFinite) ? { H: p.H } : {}) })),
+    added: (pm.added || []).filter(num), removed: (pm.removed || []).filter(num),
+    titleA: titles(pm.titleA), titleB: titles(pm.titleB), pagesA: num(pm.pagesA), pagesB: num(pm.pagesB),
+  };
+}

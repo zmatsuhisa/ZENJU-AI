@@ -112,6 +112,7 @@ public/gran-os-base.css  基本CSS v2.0（本家と同じ。値を変えない�
 public/app.css       このアプリだけの部品
 public/js/app.js     画面の動き
 public/js/overlay.js 図面の重ね合わせ（場所ごとの位置合わせ）
+public/js/pagematch.js 新旧のページの対応づけ（図面名・文字・絵の形、スキャンは特徴点）。単体の「図面差分チェック」と同じ部品
 public/js/markup/   書き込みの洗い出し（engine.js＝画像処理、view.js＝画面）
 public/js/core/      照合エンジン（ブラウザとテストで共通）
 samples/             架空のサンプル資料と作り方（make_samples.py）

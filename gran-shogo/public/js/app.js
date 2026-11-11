@@ -8,6 +8,8 @@ import { crossCheck, guessRole, changesToFindings, ROLES } from './core/check.js
 import { escapeHtml as h } from './core/normalize.js';
 import { renderPage, compose } from './overlay.js';
 import { showMarkup } from './markup/view.js';
+import { loadCv } from './markup/engine.js';
+import './pagematch.js'; // globalThis.PageMatch（ページの対応づけ。単体の「図面差分チェック」と同じ部品）
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs', import.meta.url).href;
 const CV_SRC = new URL('../vendor/opencv.js', import.meta.url).href;
@@ -219,13 +221,34 @@ async function runPair() {
   try {
     const [da, db] = await Promise.all([parse(a), parse(b)]);
     const kind = da.kind;
-    const changes = kind === 'pdf' ? diffPdf(da, db) : diffXlsx(da, db);
+    const pagemap = kind === 'pdf' ? await matchPages(a, b, t => busy(btn, true, t)) : null;
+    const changes = kind === 'pdf' ? diffPdf(da, db, pagemap) : diffXlsx(da, db);
     const findings = changesToFindings(changes, a.name, b.name, kind);
     state.session = { mode: 'pair', kind, old: a, new: b };
-    await saveRun({ mode: 'pair', title: `${a.name} → ${b.name}`, docs: [{ name: a.name, role: 'old' }, { name: b.name, role: 'new' }], findings });
+    await saveRun({ mode: 'pair', title: `${a.name} → ${b.name}`, docs: [{ name: a.name, role: 'old' }, { name: b.name, role: 'new' }], findings, pagemap });
   } catch (e) {
     console.error(e); msg.textContent = '読み込めませんでした：' + (e.message || e);
   } finally { busy(btn, false, '変更箇所を探す'); }
+}
+
+// 新旧のページの対応づけ（ページが増えた・順番が入れ替わった・スキャンと比べる、でもずれないように）
+// 1) 図面名・文字・絵の形で組にする（pagematch.js）
+// 2) 文字の読めないページ（スキャン）が残ったら、OpenCV の特徴点でさがし、傾き・伸び縮みを直す変換も求める
+async function matchPages(a, b, say) {
+  const [pa, pb] = await Promise.all([a, b].map(f => pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise));
+  const fa = await PageMatch.fingerprints(pa, (k, n) => say(`前の版のページを調べています ${k}/${n}`));
+  const fb = await PageMatch.fingerprints(pb, (k, n) => say(`新しい版のページを調べています ${k}/${n}`));
+  let m = PageMatch.match(fa, fb);
+  if ((PageMatch.hasScan(fa) || PageMatch.hasScan(fb)) && (m.added.length || m.removed.length)) {
+    say('スキャンのページを探す準備をしています');
+    try {
+      state.cv ??= (await loadCv(CV_SRC)).cv;
+      m = await PageMatch.refine(state.cv, pa, pb, fa, fb, m, (k, n) => say(`スキャンのページを探しています ${k}/${n}`));
+    } catch (e) { console.error(e); toast('スキャンのページ探しはできませんでした（文字と絵の形で合わせた分だけ比べます）', 6000); }
+  }
+  pa.destroy(); pb.destroy();
+  const titles = fs => Object.fromEntries(fs.filter(f => f.title).map(f => [f.page, f.title]));
+  return { ...m, titleA: titles(fa), titleB: titles(fb), pagesA: fa.length, pagesB: fb.length };
 }
 
 async function runMulti() {
@@ -388,12 +411,13 @@ function renderList() {
 
 // 図面の重ね合わせ（今この画面で読み込んだ新旧PDFがあるときだけ）
 // ページの切り替え：◀ ▶ の矢印、横にスクロールできるページ一覧（変更の件数つき）、キーボードの ← →
-const ov = { docs: null, pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0 };
+const ov = { docs: null, jobs: [], pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0 };
 
 async function showOverlay() {
   const slot = $('#overlay-slot');
   if (!slot) return;
   slot.innerHTML = `<section class="card section"><div class="section-h"><span class="t">図面の重ね合わせ</span><span class="prog" id="ov-prog">読み込んでいます…</span></div>
+    <p class="pad small muted" id="ov-map" hidden></p>
     <div class="pager no-print" id="ov-pager" hidden>
       <button class="pg-arrow" type="button" data-go="-1" aria-label="前のページ">‹</button>
       <div class="pg-strip" id="ov-strip" role="group" aria-label="ページ"></div>
@@ -404,11 +428,25 @@ async function showOverlay() {
     <div class="overlay-wrap" id="ov"></div></section>`;
   try {
     const [pa, pb] = await Promise.all([state.session.old, state.session.new].map(f => pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise));
-    Object.assign(ov, { docs: [pa, pb], pages: Math.max(pa.numPages, pb.numPages), page: 1, mode: 'mix', cache: new Map(), counts: {} });
-    // 文字の違いはもう分かっているので、ページ一覧に先に件数を出す
+    const jobs = pageJobs(state.run?.pagemap, pa.numPages, pb.numPages);
+    Object.assign(ov, { docs: [pa, pb], jobs, pages: jobs.length, page: 1, mode: 'mix', cache: new Map(), counts: {} });
+    const pm = state.run?.pagemap;
+    if (pm) {
+      const swapped = pm.pairs.filter(x => x.a !== x.b).length, scans = pm.pairs.filter(x => x.by === '特徴点').length;
+      const parts = [`前の版 ${pm.pagesA}ページ・新しい版 ${pm.pagesB}ページを、同じ図面どうしで組にして比べました`];
+      if (swapped) parts.push(`順番が違った組 ${swapped}`);
+      if (scans) parts.push(`スキャンを図面の形で合わせた組 ${scans}`);
+      if (pm.added.length) parts.push(`増えたページ ${pm.added.length}（${pm.added.map(b => 'p.' + b).join('・')}）`);
+      if (pm.removed.length) parts.push(`なくなったページ・合う図面がないページ ${pm.removed.length}（前の版の ${pm.removed.map(a => 'p.' + a).join('・')}）`);
+      $('#ov-map').textContent = parts.join('。') + '。';
+      $('#ov-map').hidden = false;
+    }
+    // 文字の違いはもう分かっているので、ページ一覧に先に件数を出す（新しい版のページ → 何番目の組か）
+    const jobOfB = new Map(jobs.map((j, i) => [j.b, i + 1])), jobOfA = new Map(jobs.filter(j => j.kind === 'removed').map((j, i) => [j.a, jobs.indexOf(j) + 1]));
     for (const f of state.run?.findings || []) {
       const p = f.at?.page || Number((f.obs?.[1]?.loc || '').match(/^p\.(\d+)/)?.[1]);
-      if (p) ov.counts[p] = (ov.counts[p] || 0) + 1;
+      const k = f.whole === 'removed' ? jobOfA.get(Number((f.obs?.[0]?.loc || '').match(/^p\.(\d+)/)?.[1])) : jobOfB.get(p);
+      if (k) ov.counts[k] = (ov.counts[k] || 0) + 1;
     }
     slot.querySelectorAll('[data-ov]').forEach(b => b.onclick = () => {
       ov.mode = b.dataset.ov;
@@ -435,12 +473,69 @@ function renderStrip() {
   const strip = $('#ov-strip');
   if (!strip) return;
   strip.innerHTML = Array.from({ length: ov.pages }, (_, i) => {
-    const p = i + 1, n = ov.counts[p] || 0;
-    return `<button type="button" class="pg ${p === ov.page ? 'on' : ''} ${n ? 'has' : ''}" data-p="${p}" ${p === ov.page ? 'aria-current="page"' : ''} aria-label="${p}ページ${n ? `（変更 ${n}か所）` : ''}">p.${p}${n ? `<i>${n}</i>` : ''}</button>`;
+    const p = i + 1, n = ov.counts[p] || 0, j = ov.jobs[i];
+    const label = jobLabel(j);
+    return `<button type="button" class="pg ${p === ov.page ? 'on' : ''} ${n || j.kind !== 'pair' ? 'has' : ''}" data-p="${p}" ${p === ov.page ? 'aria-current="page"' : ''} title="${h(jobTitle(j))}" aria-label="${h(jobTitle(j))}${n ? `（変更 ${n}か所）` : ''}">${h(label)}${n ? `<i>${n}</i>` : ''}</button>`;
   }).join('');
   const on = strip.querySelector('.pg.on');
   if (on) strip.scrollTo({ left: on.offsetLeft - strip.clientWidth / 2 + on.offsetWidth / 2, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   $('#ov-pager')?.querySelectorAll('[data-go]').forEach(b => { b.disabled = (b.dataset.go === '-1' ? ov.page <= 1 : ov.page >= ov.pages); });
+}
+
+// 比べるページの組（pagemap が無い古い記録は、ページ番号どうし）
+function pageJobs(pm, na, nb) {
+  if (!pm) return Array.from({ length: Math.max(na, nb) }, (_, i) => ({ kind: 'pair', a: Math.min(i + 1, na), b: Math.min(i + 1, nb) }));
+  const jobs = [
+    ...pm.pairs.map(p => ({ kind: 'pair', ...p })),
+    ...pm.added.map(b => ({ kind: 'added', b, title: pm.titleB?.[b] })),
+    ...pm.removed.map(a => ({ kind: 'removed', a, title: pm.titleA?.[a] })),
+  ];
+  return jobs.sort((x, y) => (x.b ?? x.a + 0.5) - (y.b ?? y.a + 0.5));
+}
+const jobLabel = j => (j.kind === 'added' ? `新${j.b} 増` : j.kind === 'removed' ? `前${j.a} 無` : j.a === j.b ? `p.${j.b}` : `新${j.b}←前${j.a}`);
+function jobTitle(j) {
+  const t = j.title ? `「${j.title}」` : '';
+  if (j.kind === 'added') return `新しい版の p.${j.b}${t}：前の版にないページ（増えたページ）`;
+  if (j.kind === 'removed') return `前の版の p.${j.a}${t}：新しい版に合うページがありません（なくなったページ、または図面以外のページ）`;
+  const how = { 図面名: '図面名で対応', 絵と文字: '文字と絵の形で対応', 絵の形: '絵の形で対応', 特徴点: 'スキャンを図面の形で対応' }[j.by] || '';
+  return `新しい版 p.${j.b} ↔ 前の版 p.${j.a}${t}${how ? `（${how}）` : ''}`;
+}
+
+// 前の版のページを、変換 H（PDF の pt 座標）で新しい版の画像に重なるように写す（スキャンの傾き・伸び縮みを直す）
+function warpTo(ca, sa, cb, sb, H) {
+  const cv = state.cv;
+  if (!cv || !H) return null;
+  const S = (s) => [s, 0, 0, 0, s, 0, 0, 0, 1], Si = (s) => [1 / s, 0, 0, 0, 1 / s, 0, 0, 0, 1];
+  const mul = (x, y) => { const r = new Array(9).fill(0); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) r[i * 3 + j] += x[i * 3 + k] * y[k * 3 + j]; return r; };
+  const Hpx = mul(S(sb), mul(H, Si(sa)));
+  const src = cv.imread(ca), dst = new cv.Mat(), M = cv.matFromArray(3, 3, cv.CV_64F, Hpx);
+  cv.warpPerspective(src, dst, M, new cv.Size(cb.width, cb.height), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
+  const out = document.createElement('canvas');
+  cv.imshow(out, dst);
+  src.delete(); dst.delete(); M.delete();
+  return out;
+}
+
+// 1組分を描く（重ね合わせ・変更前・変更後の3つの絵と、件数）
+async function drawJob(p) {
+  const j = ov.jobs[p - 1], [pa, pb] = ov.docs, width = 1800;
+  if (j.kind !== 'pair') {
+    const { canvas } = await renderPage(j.kind === 'added' ? pb : pa, j.kind === 'added' ? j.b : j.a, width);
+    return { views: { mix: canvas, old: canvas, new: canvas }, lines: 0, text: 0, shift: { dx: 0, dy: 0 }, whole: j.kind, n: 1 };
+  }
+  let [{ canvas: ca, words: wa, scale: sa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, j.a, width), renderPage(pb, j.b, width)]);
+  let warped = false;
+  if (j.H) { const w = warpTo(ca, sa, cb, scale, j.H); if (w) { ca = w; wa = []; warped = true; } }
+  const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb }, { scan: warped });
+  // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
+  const ctx = canvas.getContext('2d');
+  ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
+  const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === j.b);
+  for (const f of textBoxes) {
+    const { x, y, w, h: hh } = f.at;
+    ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
+  }
+  return { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved, warped, n: boxes.length + textBoxes.length };
 }
 
 async function goPage(p) {
@@ -450,31 +545,22 @@ async function goPage(p) {
   renderStrip();
   const prog = $('#ov-prog');
   if (!ov.cache.has(p)) {
-    prog.textContent = `p.${p} を描いています…`;
+    prog.textContent = `${jobLabel(ov.jobs[p - 1])} を描いています…`;
     $('#ov').classList.add('loading');
-    const [pa, pb] = ov.docs;
-    const width = 1800;
-    const [{ canvas: ca, words: wa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), width), renderPage(pb, Math.min(p, pb.numPages), width)]);
-    const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb });
-    // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
-    const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
-    const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === p);
-    for (const f of textBoxes) {
-      const { x, y, w, h: hh } = f.at;
-      ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
-    }
-    ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved });
+    const c = await drawJob(p);
+    ov.cache.set(p, c);
     // 大きな画像なので、近くの数ページ分だけ残す
     for (const k of ov.cache.keys()) if (Math.abs(k - p) > 2) ov.cache.delete(k);
-    ov.counts[p] = boxes.length + textBoxes.length; // 描けたら、線と文字の違いを合わせた件数にする
+    ov.counts[p] = c.n; // 描けたら、線と文字の違いを合わせた件数にする
   }
   if (my !== ov.seq) return;
   $('#ov').classList.remove('loading');
   const c = ov.cache.get(p);
   $('#ov').replaceChildren(c.views[ov.mode]);
   $('#ov').scrollTop = 0;
-  prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}ページ　` : ''}線の違い ${c.lines}か所・文字の違い ${c.text}か所${shiftNote(c)}`;
+  const j = ov.jobs[p - 1];
+  prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}　` : ''}${jobTitle(j)}` +
+    (c.whole ? '' : `　線の違い ${c.lines}か所・文字の違い ${c.text}か所${c.warped ? '（スキャンの傾き・伸び縮みを直して比較。スキャンは文字が読めないので、文字の比較はしていません）' : ''}${shiftNote(c)}`);
   renderStrip();
   // 次のページを先に描いておく（押したらすぐ出るように）
   if (p < ov.pages && !ov.cache.has(p + 1)) setTimeout(() => { if (ov.page === p && my === ov.seq) prefetch(p + 1); }, 300);
@@ -490,16 +576,10 @@ function shiftNote(c) {
 
 async function prefetch(p) {
   if (!ov.docs || ov.cache.has(p)) return;
-  const [pa, pb] = ov.docs;
-  const [{ canvas: ca, words: wa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, Math.min(p, pa.numPages), 1800), renderPage(pb, Math.min(p, pb.numPages), 1800)]);
+  const c = await drawJob(p);
   if (ov.cache.has(p)) return;
-  const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb });
-  const ctx = canvas.getContext('2d');
-  ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
-  const textBoxes = (state.run?.findings || []).filter(f => f.at && f.at.page === p);
-  for (const f of textBoxes) { const { x, y, w, h: hh } = f.at; ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale); }
-  ov.cache.set(p, { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved });
-  ov.counts[p] = boxes.length + textBoxes.length;
+  ov.cache.set(p, c);
+  ov.counts[p] = c.n;
   renderStrip();
 }
 

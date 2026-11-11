@@ -7,14 +7,26 @@ import { blockShifts } from './shift.js';
 
 const NEAR = 40; // PDF上で「同じ場所」とみなす距離（pt。A3図面で約14mm）
 
-export function diffPdf(oldDoc, newDoc) {
+/**
+ * @param map ページの対応（pagematch.js の結果 { pairs:[{a,b,title}], added:[b], removed:[a] }）。
+ *   無ければページ番号どうし（1枚目と1枚目…）でくらべる。
+ *   結果の page は新しい版のページ、pageA は前の版のページ。
+ */
+export function diffPdf(oldDoc, newDoc, map = null) {
   const out = [];
-  const n = Math.max(oldDoc.pages.length, newDoc.pages.length);
-  for (let i = 0; i < n; i++) {
-    const a = oldDoc.pages[i], b = newDoc.pages[i];
-    const page = i + 1;
+  const jobs = map ? map.pairs.map(p => [p.a, p.b, p.by]) : Array.from({ length: Math.max(oldDoc.pages.length, newDoc.pages.length) }, (_, i) => [i + 1, i + 1]);
+  const name = t => (t ? `「${t}」` : '');
+  if (map) {
+    for (const b of map.added) out.push({ type: 'added', page: b, whole: true, before: '', after: `新しい版の p.${b}${name(map.titleB?.[b])}`, title: `ページが増えた：新しい版の p.${b}${name(map.titleB?.[b])}` });
+    for (const a of map.removed) out.push({ type: 'removed', page: a, pageA: a, whole: true, before: `前の版の p.${a}${name(map.titleA?.[a])}`, after: '', title: `ページがなくなった：前の版の p.${a}${name(map.titleA?.[a])}` });
+  }
+  for (const [pa, pb, by] of jobs) {
+    const a = oldDoc.pages[pa - 1], b = newDoc.pages[pb - 1];
+    const page = pb;
     if (!a) { out.push({ type: 'added', page, before: '', after: `ページ ${page} が追加` }); continue; }
     if (!b) { out.push({ type: 'removed', page, before: `ページ ${page} が削除`, after: '' }); continue; }
+    // スキャンなど文字が読めないページ（特徴点で組にしたもの）は、文字の比較をしない（線の重ね合わせだけで見る）
+    if (map && (by === '特徴点' || a.chunks.length < 8 || b.chunks.length < 8)) continue;
     // 縮尺が違う図面でも位置を比べられるよう、ページの大きさで割った位置を使う
     const sa = 1, sb = a.width / b.width || 1;
     const A = a.chunks.map((c, k) => ({ ...c, k, X: c.x * sa, Y: c.y * sa, used: false }));
@@ -31,7 +43,7 @@ export function diffPdf(oldDoc, newDoc) {
       let best = cands[0], bd = dist(c, best);
       for (const d of cands) { const dd = dist(c, d); if (dd < bd) { best = d; bd = dd; } }
       c.used = best.used = true;
-      if (bd > NEAR) out.push({ type: 'moved', page, before: c.text, after: c.text, x: best.x, y: best.y, from: { x: c.x, y: c.y } });
+      if (bd > NEAR) out.push({ type: 'moved', page, pageA: pa, before: c.text, after: c.text, x: best.x, y: best.y, from: { x: c.x, y: c.y } });
     }
     // 2) 残ったものは、近くにあれば「変更」
     const restA = A.filter(c => !c.used), restB = B.filter(c => !c.used);
@@ -44,11 +56,11 @@ export function diffPdf(oldDoc, newDoc) {
       }
       if (best) {
         best.used = c.used = true;
-        out.push({ type: 'changed', page, before: c.text, after: best.text, x: best.x, y: best.y, w: best.w, h: best.h });
+        out.push({ type: 'changed', page, pageA: pa, before: c.text, after: best.text, x: best.x, y: best.y, w: best.w, h: best.h });
       }
     }
-    for (const c of restA) if (!c.used) out.push({ type: 'removed', page, before: c.text, after: '', x: c.x, y: c.y, w: c.w, h: c.h });
-    for (const d of restB) if (!d.used) out.push({ type: 'added', page, before: '', after: d.text, x: d.x, y: d.y, w: d.w, h: d.h });
+    for (const c of restA) if (!c.used) out.push({ type: 'removed', page, pageA: pa, before: c.text, after: '', x: c.x, y: c.y, w: c.w, h: c.h });
+    for (const d of restB) if (!d.used) out.push({ type: 'added', page, pageA: pa, before: '', after: d.text, x: d.x, y: d.y, w: d.w, h: d.h });
   }
   return out;
 }

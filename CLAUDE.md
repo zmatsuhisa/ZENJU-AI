@@ -13,7 +13,7 @@
 ## よく使うコマンド（`gran-shogo/` で実行）
 - `npm install` … ライブラリと画面用ファイル（public/vendor）を用意
 - `npm start` … http://127.0.0.1:3985/ で起動
-- `npm test` … 単体テスト（12件。変更したら必ず通す）
+- `npm test` … 単体テスト（17件。変更したら必ず通す）
 - `DATA=<テスト用図面フォルダ> research/e2e/run_labeled.sh` … 正解表のある4物件で MARKUP を採点（今は「指示 40/40 正解」。これを下げる変更は入れない）
 - `python3 scripts/build_artifact.py <出力先>` … スマホで開ける claude.ai Artifact 版を作る
 

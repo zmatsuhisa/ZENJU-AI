@@ -267,11 +267,12 @@ export function changesToFindings(changes, oldName, newName, kind) {
     return {
       id: 'c' + (i + 1), source: 'diff', kind: 'change', category: label[c.type] || '変更',
       severity: c.type === 'moved' ? 'info' : 'change', key: what || (c.after || c.before),
-      title: kind === 'pdf'
+      title: c.title || (kind === 'pdf'
         ? (c.type === 'changed' ? `「${c.before}」→「${c.after}」` : c.type === 'added' ? `「${c.after}」が追加` : c.type === 'removed' ? `「${c.before}」が削除` : `「${c.after}」の位置が移動`)
-        : `${what || loc}${c.formula && c.before === c.after ? ' の数式' : ''}${c.type === 'changed' ? 'が変更' : c.type === 'added' ? 'が追加' : 'が削除'}`,
+        : `${what || loc}${c.formula && c.before === c.after ? ' の数式' : ''}${c.type === 'changed' ? 'が変更' : c.type === 'added' ? 'が追加' : 'が削除'}`),
       message: `変更前 ${before || '—'} ／ 変更後 ${after || '—'}`,
-      obs: [{ doc: oldName, loc: kind === 'pdf' ? loc : (c.oldCell ? `${c.sheet}!${c.oldCell}` : loc), value: before || '—' }, { doc: newName, loc, value: after || '—' }],
+      obs: [{ doc: oldName, loc: kind === 'pdf' ? (c.whole && c.type === 'added' ? '—' : `p.${c.pageA ?? c.page}`) : (c.oldCell ? `${c.sheet}!${c.oldCell}` : loc), value: before || '—' }, { doc: newName, loc: c.whole && c.type === 'removed' ? '—' : loc, value: after || '—' }],
+      ...(c.whole ? { whole: c.type } : {}),
       at: kind === 'pdf' && c.x != null ? { page: c.page, x: c.x, y: c.y, w: c.w || 30, h: c.h || 10 } : null,
     };
   });

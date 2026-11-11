@@ -35,3 +35,23 @@ test('数件だけ動いた文字は、図の移動とみなさず「移動」�
   const d = diffPdf({ kind: 'pdf', pages: [{ page: 1, width: 1191, height: 842, chunks: a }] }, { kind: 'pdf', pages: [{ page: 1, width: 1191, height: 842, chunks: b }] });
   assert.deepEqual(d.filter(x => x.type === 'moved').map(x => x.before).sort(), ['WIC', 'トイレ'].sort());
 });
+
+test('ページの対応（pagematch の結果）があれば、その組どうしで文字をくらべ、増えた・なくなったページも出す', () => {
+  const page = (n, chunks) => ({ page: n, width: 1191, height: 842, chunks });
+  const plan = [{ text: '平面図', x: 1000, y: 800, w: 30, h: 8 }, ...['LDK', '洋室1', '洋室2', '浴室', '洗面所', 'トイレ', '玄関'].map((text, i) => ({ text, x: 100 + i * 50, y: 100, w: 20, h: 8 }))];
+  const elev = [{ text: '立面図', x: 1000, y: 800, w: 30, h: 8 }, ...['南側', '北側', '東側', '西側', 'GL', '1FL', '軒高', '最高高さ'].map((text, i) => ({ text, x: 100 + i * 50, y: 300, w: 20, h: 8 }))];
+  const before = { kind: 'pdf', pages: [page(1, plan), page(2, elev)] };
+  const plan2 = plan.map(c => (c.text === '洋室2' ? { ...c, text: '洋室3' } : c));
+  const after = { kind: 'pdf', pages: [page(1, elev), page(2, plan2), page(3, [{ text: '断面図', x: 1000, y: 800, w: 30, h: 8 }])] };
+  const map = { pairs: [{ a: 1, b: 2, by: '図面名' }, { a: 2, b: 1, by: '図面名' }], added: [3], removed: [], titleB: { 3: '断面図' } };
+  const d = diffPdf(before, after, map);
+  assert.deepEqual(d.filter(x => !x.whole).map(x => `${x.type}:${x.before}>${x.after}@${x.pageA}→${x.page}`), ['changed:洋室2>洋室3@1→2']);
+  assert.ok(d.some(x => x.whole && x.type === 'added' && x.page === 3 && /断面図/.test(x.title)));
+});
+
+test('スキャンを特徴点で組にしたページは、文字の比較をしない', () => {
+  const words = ['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7', 'H8'].map((text, i) => ({ text, x: 10 * i, y: 10, w: 5, h: 5 }));
+  const before = { kind: 'pdf', pages: [{ page: 1, width: 1191, height: 842, chunks: words }] };
+  const after = { kind: 'pdf', pages: [{ page: 1, width: 1191, height: 842, chunks: words.slice(0, 4) }] };
+  assert.equal(diffPdf(before, after, { pairs: [{ a: 1, b: 1, by: '特徴点' }], added: [], removed: [] }).length, 0);
+});

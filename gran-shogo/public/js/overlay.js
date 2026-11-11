@@ -122,8 +122,9 @@ const TILE = 48;
  * 2枚のページ画像を重ねる。返り値 { canvas, boxes:[{x,y,w,h}], shift, moved }
  * words：{ a, b }（renderPage の words）。あれば、図がまとまって動いた分を場所ごとに合わせる。
  * moved：ページ全体と違うずれで合わせた範囲（図が動いた場所）の数
+ * scan：片方がスキャン（にじみ・線の太さの違いを大目に見る）
  */
-export function compose(canvasA, canvasB, words = null) {
+export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
   const A = gray(canvasA), B = gray(canvasB);
   const w = A.w, h = Math.max(A.h, B.h);
   // --- ずれの候補を集める ---
@@ -149,7 +150,11 @@ export function compose(canvasA, canvasB, words = null) {
   }
   const at = (X, x, y) => (x >= 0 && y >= 0 && x < X.w && y < X.h ? X.g[y * X.w + x] < DARK : false);
   // 1px のにじみは差分にしない（近くに相手の線があれば同じ線とみなす）
-  const near = (X, x, y) => at(X, x, y) || at(X, x + 1, y) || at(X, x - 1, y) || at(X, x, y + 1) || at(X, x, y - 1);
+  // スキャンは線がにじみ・太さも違うので、2px まで離れていても同じ線とみなす
+  const R = scan ? 2 : 1;
+  const near = R === 1
+    ? (X, x, y) => at(X, x, y) || at(X, x + 1, y) || at(X, x - 1, y) || at(X, x, y + 1) || at(X, x, y - 1)
+    : (X, x, y) => { for (let d = -R; d <= R; d++) for (let e = -R; e <= R; e++) if (at(X, x + e, y + d)) return true; return false; };
   // --- 場所（48px のマス）ごとに、どのずれが一番よく合うかを選ぶ ---
   const tw = Math.ceil(w / TILE), th = Math.ceil(h / TILE), K = shifts.length;
   const score = new Float32Array(tw * th * K);
@@ -240,7 +245,7 @@ export function compose(canvasA, canvasB, words = null) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  const boxes = regions(diff, gw, gh, cell, 6);
+  const boxes = regions(diff, gw, gh, cell, scan ? 12 : 6);
   ctx.strokeStyle = '#f7890a';
   ctx.lineWidth = Math.max(2, w / 600);
   for (const b of boxes) roundRect(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 10);
