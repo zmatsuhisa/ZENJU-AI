@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>金物着色｜グランOS</title>
+  <!-- グランOS の骨組み。見た目は gran-os-base.css（値を変えない）、このアプリだけの部品は app.css -->
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <meta name="theme-color" content="#F6AB00">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Poppins:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="gran-os-base.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#">
+      <svg class="mark" viewBox="0 0 192 192" aria-hidden="true"><g fill="#F6AB00">
+        <rect x="0" y="0" width="192" height="44" rx="6"></rect>
+        <rect x="0" y="0" width="44" height="192" rx="6"></rect>
+        <rect x="70" y="74" width="122" height="44" rx="6"></rect>
+        <rect x="70" y="148" width="122" height="44" rx="6"></rect>
+        <rect x="70" y="74" width="46" height="118"></rect>
+      </g></svg>
+      <span><span class="en">GRANHOUSE</span><span class="jp">金物着色</span></span>
+    </a>
+    <div class="sync"><span><i class="dot" id="sync-dot"></i><span id="sync-text">準備中</span></span></div>
+  </header>
+
+  <main class="app" id="app">
+    <div class="phead">
+      <div>
+        <div class="kicker">KANAMONO</div>
+        <div class="title"><span class="big">COLOR</span><h1>金物図の着色</h1></div>
+      </div>
+      <p class="sub">構造図（金物図）のPDFを選ぶと、金物リストと壁の表（筋かい・面材）の記号ごとに色を決めて、図面全体の同じ記号に同じ色をつけます。図面はこの端末の中だけで読み、外へは送りません。</p>
+    </div>
+
+    <!-- 1 図面を選ぶ -->
+    <section class="card section" id="step-file">
+      <div class="section-h"><span class="step-no">1</span><span class="t">図面を選ぶ</span></div>
+      <div class="pad">
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+          <span class="drop-main">ここに構造図のPDFを置く</span>
+          <span class="drop-sub">または、押して選ぶ</span>
+        </label>
+        <p class="filemsg" id="filemsg" hidden></p>
+      </div>
+    </section>
+
+    <!-- 2 色分け（設定）：金物リストと壁の表 -->
+    <section class="card section" id="step-legend" hidden>
+      <div class="section-h"><span class="step-no">2</span><span class="t">記号ごとの色分け（設定）</span></div>
+      <div class="pad">
+        <p class="small muted hint">金物リストと壁の表に、記号ごとの色をつけました。色の丸を押すと色を変えられます。斜線の行（使わないもの）は、はじめは塗りません。決めた色は次の図面でも使います。</p>
+        <div id="legend-groups"></div>
+        <button class="btn btn-sm" id="reset-colors" type="button">はじめの色に戻す</button>
+      </div>
+    </section>
+
+    <!-- 3 図面全体 -->
+    <section class="card section" id="step-plan" hidden>
+      <div class="section-h"><span class="step-no">3</span><span class="t">図面全体に色をつける</span></div>
+      <div class="pad">
+        <div class="summary" id="summary"></div>
+        <ul class="warns" id="warns"></ul>
+        <div class="actions">
+          <button class="btn-primary" id="save" type="button">色をつけたPDFを保存</button>
+          <button class="btn" id="zoom" type="button" aria-pressed="false">図面を大きく見る</button>
+        </div>
+        <div id="pages"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

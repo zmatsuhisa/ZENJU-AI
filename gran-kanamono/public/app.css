@@ -1,0 +1,69 @@
+/* 金物着色だけの部品（共通の見た目は gran-os-base.css） */
+.step-no { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--grad-orange); color: #fff; font-family: Poppins, sans-serif; font-weight: 700; font-size: 13px; flex: none; }
+.section-h .prog { font-family: "Zen Kaku Gothic New", sans-serif; font-weight: 500; }
+
+/* 1 図面を選ぶ */
+.drop { display: grid; place-items: center; gap: 4px; padding: 34px 16px; border: 2px dashed #d9d9d9; border-radius: 16px;
+  background: #fafafa; cursor: pointer; text-align: center; transition: border-color .15s, background .15s; }
+.drop:hover, .drop.over { border-color: var(--orange); background: #fff8ee; }
+.drop-main { font-weight: 700; font-size: 15px; }
+.drop-sub { font-size: 12px; color: var(--muted); }
+.drop.has { padding: 16px; }
+.filemsg { margin: 12px 0 0; font-size: 13px; padding: 10px 14px; border-radius: 12px; background: var(--line-2); }
+.filemsg.error { background: var(--red-soft); color: var(--red); }
+.filemsg.done { background: var(--green-soft); color: var(--green); }
+
+/* 2 色分け（金物リスト・壁の表） */
+.legend-group { margin-bottom: 22px; }
+.lg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 10px; font-size: 15px; letter-spacing: .04em; }
+.lg-head span { font-size: 12px; font-weight: 500; color: var(--muted); }
+.legend-wrap { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.legend-view { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.legend-view canvas { display: block; width: 100%; height: auto; }
+.hint { margin: 0 0 14px; }
+.krows { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
+.krow { border: 1px solid var(--line-2); border-radius: 14px; background: #fff; }
+.krow .main { display: grid; grid-template-columns: 40px 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 12px; }
+.krow.off .main { opacity: .62; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #d4d4d4; padding: 0; }
+.swatch.none { background: repeating-linear-gradient(135deg, #fff 0 5px, #e3e3e3 5px 7px); }
+.krow .sym { font-size: 20px; font-weight: 700; text-align: center; display: flex; justify-content: center; }
+.symsvg { width: 28px; height: 28px; color: var(--ink); }
+.krow .nm { min-width: 0; }
+.krow .nm b { display: block; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.krow .nm > span { display: block; font-size: 11px; color: var(--muted); }
+.krow .cnt { text-align: right; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.krow .cnt .num { font-size: 16px; color: var(--ink); }
+.palette { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 12px 12px 62px; }
+.palette button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #d4d4d4; padding: 0; }
+.palette button.on { box-shadow: 0 0 0 2px var(--ink); }
+.palette .none-btn { width: auto; padding: 0 12px; border-radius: var(--pill); background: #f4f4f4; font-size: 11px; font-weight: 700; color: var(--ink-2); }
+
+/* 3 図面全体 */
+#step-plan .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.warns { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
+.warns li { font-size: 13px; padding: 9px 14px; border-radius: 12px; background: var(--amber-soft); color: var(--amber-ink); }
+.warns li.bad { background: var(--red-soft); color: var(--red); }
+.warns li.ok { background: var(--green-soft); color: var(--green); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.actions .btn-primary { padding: 12px 26px; font-size: 13px; }
+.actions .btn-primary:disabled { opacity: .6; cursor: wait; }
+.pagebox { margin-bottom: 14px; }
+.pagebox .ph { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+.pagebox .ph b { color: var(--ink); }
+.pageview { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: auto; -webkit-overflow-scrolling: touch; max-height: 80vh; }
+.pageview canvas { display: block; width: 100%; height: auto; }
+.zoomed .pageview canvas { width: 260%; max-width: none; }
+
+@media (max-width: 1100px) {
+  .legend-wrap { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .section-h { padding: 12px 16px; }
+  .pad { padding: 14px 16px; }
+  .krow .main { grid-template-columns: 38px 28px minmax(0, 1fr) auto; gap: 8px; padding: 8px 10px; }
+  .palette { padding: 2px 10px 12px 10px; }
+  .drop { padding: 26px 12px; }
+  .zoomed .pageview canvas { width: 420%; }
+}
