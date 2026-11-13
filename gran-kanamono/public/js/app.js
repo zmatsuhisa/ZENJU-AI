@@ -243,18 +243,33 @@ $('save').addEventListener('click', async (e) => {
   btn.disabled = true; btn.textContent = '作っています…';
   try {
     const out = await paintPdf(PDFLib, st.bytes, currentPaint());
-    const url = URL.createObjectURL(new Blob([out], { type: 'application/pdf' }));
+    const filename = st.name.replace(/\.pdf$/i, '') + '_着色.pdf';
+    const blob = new Blob([out], { type: 'application/pdf' });
+    // claude.ai の Artifact の中では、ページから直接は保存できないので、保存の確認画面を出してもらう
+    const dl = await downloadsApi;
+    if (dl) {
+      await dl.save({ filename, data: blob });
+      toast('色をつけたPDFを保存しました');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = st.name.replace(/\.pdf$/i, '') + '_着色.pdf';
+    a.href = url; a.download = filename;
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     toast('色をつけたPDFを保存しました');
   } catch (err) {
     console.error(err);
-    toast('保存できませんでした：' + (err?.message || err));
+    if (err?.code === 'declined') toast('保存をやめました');
+    else toast('保存できませんでした：' + (err?.message || err));
   } finally {
     btn.disabled = false; btn.textContent = '色をつけたPDFを保存';
   }
 });
+
+// claude.ai の Artifact の中で開いたときだけある保存の仕組み（ふつうのブラウザでは null）
+const downloadsApi = (async () => {
+  try { return window.claude?.use ? await window.claude.use('downloads') : null; } catch { return null; }
+})();
 
 status('図面を選んでください');
