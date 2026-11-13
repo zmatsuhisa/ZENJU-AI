@@ -180,23 +180,28 @@ export function countBySymbol(marks) {
  * はじめの色分け。保存してある色（記号→色）を優先し、ないものは上の行から順に色を配る。
  * 斜線の行（使わない金物）は「塗らない」。
  */
-export function defaultColors(rows, saved = {}) {
+export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id), taken = []) {
   const out = {};
-  const used = new Set(Object.values(saved));
+  const keyOf = (r) => r.key ?? r.s;
+  const used = new Set([...taken, ...rows.map((r) => saved[keyOf(r)]).filter(Boolean)]);
   let k = 0;
   const next = () => {
-    for (let n = 0; n < PALETTE.length; n++) {
-      const id = PALETTE[(k + n) % PALETTE.length].id;
-      if (!used.has(id)) { k = (k + n + 1) % PALETTE.length; used.add(id); return id; }
+    for (let n = 0; n < order.length; n++) {
+      const id = order[(k + n) % order.length];
+      if (!used.has(id)) { k = (k + n + 1) % order.length; used.add(id); return id; }
     }
-    return PALETTE[k++ % PALETTE.length].id;
+    return order[k++ % order.length];
   };
   for (const r of rows) {
-    if (saved[r.s] && (saved[r.s] === NONE || colorHex(saved[r.s]))) out[r.s] = saved[r.s];
-    else out[r.s] = r.struck ? NONE : next();
+    const key = keyOf(r);
+    if (saved[key] && (saved[key] === NONE || colorHex(saved[key]))) out[key] = saved[key];
+    else out[key] = r.struck ? NONE : next();
   }
   return out;
 }
+
+/** 壁の記号のはじめの色の順番（金物とできるだけ違う色から使う） */
+export const WALL_ORDER = ['blue', 'pink', 'lime', 'brown', 'sky', 'orange', 'green', 'purple', 'yellow', 'red', 'gray'];
 
 /**
  * 塗るものの一覧（PDF の座標）。画面の下書き表示と PDF への書き込みの両方がこれを使う。

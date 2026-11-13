@@ -17,7 +17,7 @@
 - `DATA=<テスト用図面フォルダ> research/e2e/run_labeled.sh` … 正解表のある4物件で MARKUP を採点（今は「指示 40/40 正解」。これを下げる変更は入れない）
 - `python3 scripts/build_artifact.py <出力先>` … スマホで開ける claude.ai Artifact 版を作る
 
-`gran-kanamono/` では `npm install` → `npm start`（http://127.0.0.1:3986/）・`npm test`（単体テスト8件）・`node scripts/check.mjs <図面.pdf>`（実物で記号の数を確かめる）。
+`gran-kanamono/` では `npm install` → `npm start`（http://127.0.0.1:3986/）・`npm test`（単体テスト13件）・`node scripts/check.mjs <図面.pdf>`（実物で記号の数を確かめる）。
 
 ## 進め方
 - 1つの課題 = 1つのブランチ = 1つの PR。課題は GitHub の Issue にある。

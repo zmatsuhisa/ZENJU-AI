@@ -1,5 +1,6 @@
 // pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
 import { toGlyph, findLegend, findMarks } from './core.js';
+import { findWallLegend, findWallMarks, excludeZones } from './walls.js';
 
 /** ページごとの文字（toGlyph の形） */
 export async function readGlyphs(doc) {
@@ -40,31 +41,61 @@ export async function readSegments(pdfjs, page, box = null) {
     else if (fn === OPS.constructPath) {
       const [ops, nums] = args;
       let k = 0, cur = null, start = null;
+      const line = (p) => { if (cur) { const s = [...cur, ...p]; if (keep(s)) segs.push(s); } cur = p; };
+      // 曲線は短い線に分ける（円や弧の形を比べられるように）
+      const bez = (p1, p2, p3) => {
+        const p0 = cur || p3;
+        for (let i = 1; i <= 6; i++) {
+          const t = i / 6, u = 1 - t;
+          line([u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+            u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]);
+        }
+      };
       for (const o of ops) {
         if (o === OPS.moveTo) { cur = start = ap(nums[k], nums[k + 1]); k += 2; }
-        else if (o === OPS.lineTo) { const p = ap(nums[k], nums[k + 1]); k += 2; if (cur) { const s = [...cur, ...p]; if (keep(s)) segs.push(s); } cur = p; }
-        else if (o === OPS.curveTo) { cur = ap(nums[k + 4], nums[k + 5]); k += 6; }
-        else if (o === OPS.curveTo2 || o === OPS.curveTo3) { cur = ap(nums[k + 2], nums[k + 3]); k += 4; }
-        else if (o === OPS.rectangle) k += 4;
-        else if (o === OPS.closePath) { if (cur && start) { const s = [...cur, ...start]; if (keep(s)) segs.push(s); } cur = start; }
+        else if (o === OPS.lineTo) { line(ap(nums[k], nums[k + 1])); k += 2; }
+        else if (o === OPS.curveTo) { bez(ap(nums[k], nums[k + 1]), ap(nums[k + 2], nums[k + 3]), ap(nums[k + 4], nums[k + 5])); k += 6; }
+        else if (o === OPS.curveTo2) { bez(cur || ap(nums[k], nums[k + 1]), ap(nums[k], nums[k + 1]), ap(nums[k + 2], nums[k + 3])); k += 4; }
+        else if (o === OPS.curveTo3) { const p3 = ap(nums[k + 2], nums[k + 3]); bez(ap(nums[k], nums[k + 1]), p3, p3); k += 4; }
+        else if (o === OPS.rectangle) {
+          const [x, y, w, h] = nums.slice(k, k + 4); k += 4;
+          cur = start = ap(x, y);
+          line(ap(x + w, y)); line(ap(x + w, y + h)); line(ap(x, y + h)); line(start);
+        }
+        else if (o === OPS.closePath) { if (cur && start) line(start); cur = start; }
       }
     }
   }
   return segs;
 }
 
-/** PDF を読んで、リスト・記号・ページの大きさまでまとめて返す */
-export async function analyze(pdfjs, doc) {
+/**
+ * PDF を読んで、金物リスト・金物記号・壁の表・壁の記号までまとめて返す。
+ * @returns { pages, legend, found, walls: { legend, marks } | null }
+ */
+export async function analyze(pdfjs, doc, onProgress = () => {}) {
   const pages = await readGlyphs(doc);
-  // 斜線を見るのは、リストの候補があるページだけ（線の多い図面全部を読むと遅い）
+  const segs = [];
+  const sizes = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    onProgress(n, doc.numPages);
+    const page = await doc.getPage(n);
+    const [x0, y0, x1, y1] = page.view;
+    sizes.push({ w: x1 - x0, h: y1 - y0 });
+    segs.push(await readSegments(pdfjs, page));
+  }
   let legend = null;
   for (let i = 0; i < pages.length && !legend; i++) {
-    const rough = findLegend(pages[i].glyphs);
-    if (!rough) continue;
-    const page = await doc.getPage(i + 1);
-    const segs = await readSegments(pdfjs, page, rough.box);
-    legend = findLegend(pages[i].glyphs, segs);
+    if (findLegend(pages[i].glyphs)) legend = findLegend(pages[i].glyphs, segs[i]);
   }
-  if (!legend) return { pages, legend: null, found: null };
-  return { pages, legend, found: findMarks(pages, legend) };
+  let wallLegend = null;
+  for (let i = 0; i < pages.length && !wallLegend; i++) wallLegend = findWallLegend(pages[i].glyphs, segs[i], i);
+  const found = legend ? findMarks(pages, legend) : null;
+  const walls = wallLegend ? {
+    legend: wallLegend,
+    marks: findWallMarks(segs.map((s) => ({ segs: s })), wallLegend, {
+      exclude: excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes),
+    }),
+  } : null;
+  return { pages, legend, found, walls };
 }

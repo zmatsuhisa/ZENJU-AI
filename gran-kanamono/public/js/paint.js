@@ -23,9 +23,9 @@ export async function paintPdf(lib, bytes, paint) {
     if (p.kind === 'band') {
       page.drawRectangle({ x: p.x0, y: p.y0, width: p.x1 - p.x0, height: p.y1 - p.y0, color, opacity: ALPHA.band, blendMode: lib.BlendMode.Multiply });
     } else if (p.kind === 'warn') {
-      page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.r, yScale: p.r, borderColor: color, borderWidth: 0.9, borderOpacity: ALPHA.warn });
+      page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.rx ?? p.r, yScale: p.ry ?? p.r, borderColor: color, borderWidth: 0.9, borderOpacity: ALPHA.warn });
     } else {
-      page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.r, yScale: p.r, color, opacity: ALPHA[p.kind], blendMode: lib.BlendMode.Multiply });
+      page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.rx ?? p.r, yScale: p.ry ?? p.r, color, opacity: ALPHA[p.kind], blendMode: lib.BlendMode.Multiply });
     }
   }
   return doc.save();

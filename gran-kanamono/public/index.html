@@ -35,7 +35,7 @@
         <div class="kicker">KANAMONO</div>
         <div class="title"><span class="big">COLOR</span><h1>金物図の着色</h1></div>
       </div>
-      <p class="sub">構造図（金物図）のPDFを選ぶと、金物リストの記号ごとに色を決めて、図面全体の同じ記号に同じ色をつけます。図面はこの端末の中だけで読み、外へは送りません。</p>
+      <p class="sub">構造図（金物図）のPDFを選ぶと、金物リストと壁の表（筋かい・面材）の記号ごとに色を決めて、図面全体の同じ記号に同じ色をつけます。図面はこの端末の中だけで読み、外へは送りません。</p>
     </div>
 
     <!-- 1 図面を選ぶ -->
@@ -51,16 +51,13 @@
       </div>
     </section>
 
-    <!-- 2 金物リストの色分け（設定） -->
+    <!-- 2 色分け（設定）：金物リストと壁の表 -->
     <section class="card section" id="step-legend" hidden>
-      <div class="section-h"><span class="step-no">2</span><span class="t">金物リストの色分け（設定）</span><span class="prog" id="legend-where"></span></div>
-      <div class="legend-wrap">
-        <div class="legend-view"><canvas id="legend-canvas" aria-label="色をつけた金物リスト"></canvas></div>
-        <div class="legend-rows">
-          <p class="small muted hint">色の丸を押すと、色を変えられます。斜線の行（使わない金物）は、はじめは塗りません。決めた色は次の図面でも使います。</p>
-          <ul class="krows" id="krows"></ul>
-          <button class="btn btn-sm" id="reset-colors" type="button">はじめの色に戻す</button>
-        </div>
+      <div class="section-h"><span class="step-no">2</span><span class="t">記号ごとの色分け（設定）</span></div>
+      <div class="pad">
+        <p class="small muted hint">金物リストと壁の表に、記号ごとの色をつけました。色の丸を押すと色を変えられます。斜線の行（使わないもの）は、はじめは塗りません。決めた色は次の図面でも使います。</p>
+        <div id="legend-groups"></div>
+        <button class="btn btn-sm" id="reset-colors" type="button">はじめの色に戻す</button>
       </div>
     </section>
 
