@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { toGlyph } from '../public/js/core.js';
-import { findWallLegend, findWallMarks, clusterSegments, rasterize, similarity, excludeZones, countByKey } from '../public/js/walls.js';
+import { findWallLegend, findWallMarks, clusterSegments, rasterize, similarity, excludeZones, countByKey, dropDashes } from '../public/js/walls.js';
 
 const T = (str, x, y, size = 6) => ({ ...toGlyph({ str, transform: [size, 0, 0, size, x, y], width: size * [...str].length }), page: 0 });
 const poly = (pts) => pts.map((p, i) => [...p, ...pts[(i + 1) % pts.length]]);
@@ -85,4 +85,20 @@ test('凡例の見出しから右下は探さない', () => {
   const ex = excludeZones([[T('●凡例', 900, 200, 8)]], [], [{ w: 1190 }]);
   assert.equal(ex[0].length, 1);
   assert.ok(ex[0][0].x0 < 900 && ex[0][0].x1 === 1190 && ex[0][0].y1 > 200);
+});
+
+test('点線（通り芯）が上を通っている記号も見つける', () => {
+  const { glyphs, segs } = sample();
+  const wl = findWallLegend(glyphs, segs);
+  const plan = [...tri(500, 300, 9, 4.5)];
+  // 記号の真ん中を通る横の点線（長さ1.4・すき間1.4）
+  for (let x = 470; x < 530; x += 2.8) plan.push([x, 300, x + 1.4, 300]);
+  const marks = findWallMarks([{ segs: [...segs, ...plan] }], wl, { exclude: { 0: [wl.box] } });
+  assert.ok(marks.some((m) => m.key === wl.rows[0].key && Math.abs(m.cx - 500) < 1 && Math.abs(m.cy - 300) < 1));
+});
+
+test('点線の短い線だけを取り除き、記号の線は残す', () => {
+  const dashes = [[0, 0, 1.4, 0], [2.8, 0, 4.2, 0], [5.6, 0, 7, 0]];
+  const t = tri(20, 20, 9, 4.5);
+  assert.equal(dropDashes([...dashes, ...t]).length, t.length);
 });

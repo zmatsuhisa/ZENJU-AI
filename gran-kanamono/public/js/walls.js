@@ -114,6 +114,36 @@ function readCells(texts) {
 }
 
 /**
+ * 点線（通り芯など）の短い線を取り除く。
+ * 縦か横の短い線で、同じ線の上に少しすき間をあけて別の短い線が並んでいるもの。
+ * 記号の上を点線が通っていても、記号の形だけを比べられるようにする。
+ */
+export function dropDashes(segs, { maxDash = 5, minGap = 0.3, maxGap = 4 } = {}) {
+  const key = (v) => Math.round(v * 20); // 0.05pt 単位で同じ線とみなす
+  const lines = new Map();
+  const info = segs.map((s) => {
+    const horiz = Math.abs(s[1] - s[3]) < 0.02, vert = Math.abs(s[0] - s[2]) < 0.02;
+    if ((!horiz && !vert) || len(s) > maxDash || len(s) < 0.05) return null;
+    const k = (horiz ? 'h' : 'v') + key(horiz ? s[1] : s[0]);
+    const a = horiz ? Math.min(s[0], s[2]) : Math.min(s[1], s[3]);
+    const b = horiz ? Math.max(s[0], s[2]) : Math.max(s[1], s[3]);
+    const it = { a, b };
+    if (!lines.has(k)) lines.set(k, []);
+    lines.get(k).push(it);
+    return it;
+  });
+  const dash = new Set();
+  for (const list of lines.values()) {
+    list.sort((p, q) => p.a - q.a);
+    for (let i = 1; i < list.length; i++) {
+      const gap = list[i].a - list[i - 1].b;
+      if (gap >= minGap && gap <= maxGap) { dash.add(list[i]); dash.add(list[i - 1]); }
+    }
+  }
+  return segs.filter((_, i) => !info[i] || !dash.has(info[i]));
+}
+
+/**
  * 線分を、つながった（重なり合う）図形ごとにまとめる。長い線（壁・通り芯）は除く。
  * @returns [{ segs, box }]
  */
@@ -237,7 +267,7 @@ export function findWallMarks(pages, wallLegend, { exclude = {}, minScore = 0.9,
   const marks = [];
   pages.forEach((p, page) => {
     const ex = exclude[page] || [];
-    for (const c of clusterSegments(p.segs, { maxLen: maxSize * 1.3 })) {
+    for (const c of clusterSegments(dropDashes(p.segs), { maxLen: maxSize * 1.3 })) {
       const w = c.box.x1 - c.box.x0, h = c.box.y1 - c.box.y0;
       const size = Math.max(w, h);
       if (size < minSize * 0.6 || size > maxSize * 1.4 || c.segs.length < 2) continue;
@@ -247,7 +277,7 @@ export function findWallMarks(pages, wallLegend, { exclude = {}, minScore = 0.9,
       const g = rasterize(c.segs, c.box);
       const scored = [];
       for (const t of temps) {
-        if (size < t.size * 0.7 || size > t.size * 1.4) continue;
+        if (size < t.size * 0.6 || size > t.size * 1.4) continue;
         if (Math.abs(aspect - t.aspect) > 0.22) continue;
         let sc = 0;
         for (const r of t.rasters) sc = Math.max(sc, similarity(g, r.g, r.d));
