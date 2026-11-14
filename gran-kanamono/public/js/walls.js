@@ -308,7 +308,7 @@ export function countByKey(marks) {
 export function buildWallPaint(wallLegend, marks, colors, colorHex) {
   const out = [];
   const rowOf = new Map(wallLegend.rows.map((r) => [r.key, r]));
-  const pad = 1.4;
+  const pad = 2.6; // 記号のまわりの色の幅（ひとまわり大きく）
   for (const r of wallLegend.rows) {
     const hex = colorHex(colors[r.key]);
     if (!hex) continue;
@@ -319,7 +319,7 @@ export function buildWallPaint(wallLegend, marks, colors, colorHex) {
   for (const m of marks) {
     const hex = colorHex(colors[m.key]);
     // 細い記号でも色が見えるように、輪は少し丸みを持たせる
-    const rx = Math.max((m.box.x1 - m.box.x0) / 2 + pad, 3.4), ry = Math.max((m.box.y1 - m.box.y0) / 2 + pad, 3.4);
+    const rx = Math.max((m.box.x1 - m.box.x0) / 2 + pad, 4.8), ry = Math.max((m.box.y1 - m.box.y0) / 2 + pad, 4.8);
     if (hex) out.push({ kind: 'mark', page: m.page, hex, cx: m.cx, cy: m.cy, rx, ry });
     if (rowOf.get(m.key)?.struck) out.push({ kind: 'warn', page: m.page, hex: '#E0001B', cx: m.cx, cy: m.cy, rx: rx + 2, ry: ry + 2 });
   }

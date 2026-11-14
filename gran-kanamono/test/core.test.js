@@ -89,7 +89,9 @@ test('塗るもの：斜線の金物が図面にあれば赤い輪をつける',
   const f = findMarks([{ glyphs: page }], lg);
   const paint = buildPaint(lg, f.marks, defaultColors(lg.rows));
   assert.equal(paint.filter((p) => p.kind === 'warn').length, 1);
-  assert.equal(paint.filter((p) => p.kind === 'mark').length, 10); // 「ち」は塗らない（輪だけ）
+  // 柱の上下に並ぶ同じ記号（5組）は1つの楕円にまとめる。「ち」は塗らない（輪だけ）
+  assert.equal(paint.filter((p) => p.kind === 'mark').length, 5);
+  assert.ok(paint.filter((p) => p.kind === 'mark').every((p) => p.ry > p.rx));
   assert.equal(paint.filter((p) => p.kind === 'band').length, 3);
 });
 

@@ -214,15 +214,31 @@ export function buildPaint(legend, marks, colors) {
     const hex = colorHex(colors[r.s]);
     if (!hex) continue;
     out.push({ kind: 'band', page: legend.page, hex, x0: legend.box.x0 + 1, x1: legend.box.x1 - 1, y0: r.cy - legend.rowH / 2 + 0.8, y1: r.cy + legend.rowH / 2 - 0.8 });
-    out.push({ kind: 'legend', page: legend.page, hex, cx: r.cx, cy: r.cy, r: legend.rowH * 0.36 });
+    out.push({ kind: 'legend', page: legend.page, hex, cx: r.cx, cy: r.cy, r: legend.rowH * 0.44 });
   }
+  // 記号の丸（ひとまわり大きく）。同じ記号が近くに並ぶとき（柱の上下など）は、重なって色が濃くならないように
+  // 1つの楕円にまとめる
+  const R = (g) => g.size * MARK_SCALE;
+  const groups = [];
   for (const g of marks) {
     const hex = colorHex(colors[g.s]);
-    if (hex) out.push({ kind: 'mark', page: g.page, hex, cx: g.cx, cy: g.cy, r: g.size * 1.05 });
-    if (rowOf.get(g.s)?.struck) out.push({ kind: 'warn', page: g.page, hex: '#E0001B', cx: g.cx, cy: g.cy, r: g.size * 1.6 });
+    if (rowOf.get(g.s)?.struck) out.push({ kind: 'warn', page: g.page, hex: '#E0001B', cx: g.cx, cy: g.cy, r: R(g) + 1.6 });
+    if (!hex) continue;
+    const near = groups.find((k) => k.page === g.page && k.s === g.s && k.items.length < 2
+      && Math.hypot(k.items[0].cx - g.cx, k.items[0].cy - g.cy) < R(g) * 2);
+    if (near) near.items.push(g); else groups.push({ page: g.page, s: g.s, hex, items: [g] });
+  }
+  for (const k of groups) {
+    const r = R(k.items[0]);
+    const xs = k.items.map((g) => g.cx), ys = k.items.map((g) => g.cy);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    out.push({ kind: 'mark', page: k.page, hex: k.hex, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: r + (x1 - x0) / 2, ry: r + (y1 - y0) / 2 });
   }
   return out;
 }
+
+/** 記号の丸の大きさ（字の大きさの何倍か） */
+export const MARK_SCALE = 1.4;
 
 /** 塗りの強さ（画面と PDF で同じ見え方にする） */
 export const ALPHA = { band: 0.3, legend: 0.75, mark: 0.7, warn: 1 };
