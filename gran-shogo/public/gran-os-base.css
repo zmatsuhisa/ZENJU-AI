@@ -1,0 +1,309 @@
+/* =========================================================
+   グランOS 基本CSS  v2.0（2026-09-22）
+   本家＝工程フローチャート（koutei-flow-app/public/style.css）の値をそのまま抜き出したもの。
+   入金確認アプリ（gran-payment）に移植して、本家と同じ仕上がりになることを確認済み。
+   値を変えるときは本家と見比べてから。クラス名も本家と同じにしてある。
+   必要な書体（<head> に入れる）:
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Poppins:wght@500;600;700&display=swap">
+   ========================================================= */
+:root {
+  --orange: #f7890a;
+  --grad-orange: linear-gradient(135deg, #f7890a 0%, #f9c13c 100%);
+  --grad-green: linear-gradient(135deg, #08cc00 0%, #a5cc00 100%);
+  --grad-blue: linear-gradient(135deg, #446beb 0%, #04bbfe 100%);
+  --grad-red: linear-gradient(135deg, #c8372d 0%, #ea6a4f 100%);
+  --brand: #f6ab00;            /* GRANHOUSE シンボルマークの色。ロゴ以外には使わない */
+  --ink: #272727;
+  --ink-2: #333333;
+  --sub: #6f6f6f;              /* 見出し横の説明・集計の説明 */
+  --muted: #8a8a8a;
+  --muted-2: #9a9a9a;
+  --line: #e6e6e6;
+  --line-2: #f2f2f2;
+  --bg: #f0f0f0;
+  --card-bg: #ffffff;
+  --red: #c8372d;
+  --red-soft: #fdecea;
+  --green: #2f9e44;
+  --green-soft: #e8f5ec;
+  --amber-soft: #fdf0dd;
+  --amber-ink: #b06a00;
+  --radius: 20px;
+  --pill: 80px;
+  --shadow: 0 3px 10px rgba(0, 0, 0, .1);
+  --shadow-hover: 0 6px 18px rgba(0, 0, 0, .13);
+  font-family: "Zen Kaku Gothic New", "Yu Gothic UI", "Hiragino Sans", Meiryo, system-ui, sans-serif;
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); font-size: 14px; line-height: 1.7; }
+/* 画面の左上から広がるオレンジのグロー（グランOSの顔。消さない） */
+body::before {
+  content: ""; position: fixed; left: -280px; top: -320px; width: 1100px; height: 900px; z-index: 0;
+  background: radial-gradient(closest-side, rgba(247,137,10,.45) 0%, rgba(249,193,60,.2) 45%, rgba(240,240,240,0) 78%);
+  pointer-events: none;
+}
+a { color: var(--orange); text-decoration: none; }
+a:hover { color: #d97406; }
+button { font: inherit; cursor: pointer; }
+input, select, textarea { font: inherit; color: inherit; }
+h1 { font-size: 26px; font-weight: 700; letter-spacing: .08em; margin: 0; }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+/* 数字・日付は Poppins。数字と単位は折り返さない */
+.num, .stat .n { font-family: Poppins, "Zen Kaku Gothic New", sans-serif; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+.en { font-family: Poppins, sans-serif; font-weight: 600; letter-spacing: .02em; }
+
+/* ---------- 上部バー ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 34px;
+  padding: 0 40px; height: 76px;
+  background: linear-gradient(#f1f1f1 0%, rgba(241,241,241,.92) 62%, rgba(240,240,240,.75) 100%);
+  backdrop-filter: blur(6px);
+}
+.brand { display: flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.brand:hover { color: var(--ink); }
+.brand .mark { width: 30px; height: 30px; flex: none; }
+.brand .en { font-size: 9px; letter-spacing: .26em; color: var(--muted-2); display: block; }
+.brand .jp { font-size: 15px; font-weight: 700; letter-spacing: .06em; }
+.nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.nav::-webkit-scrollbar { display: none; }
+.nav a { color: var(--ink-2); font-size: 13px; font-weight: 700; text-decoration: none; padding: 6px 11px 5px; white-space: nowrap; }
+.nav a:hover { color: var(--ink); }
+.nav a.active { color: var(--ink); box-shadow: inset 0 -3px 0 var(--orange); }
+.sync { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 12px; color: #7c7c7c; white-space: nowrap; }
+.sync .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--grad-green); margin-right: 6px; }
+.sync .dot.warn { background: var(--grad-orange); }
+
+.app { position: relative; z-index: 1; max-width: 1560px; margin: 0 auto; padding: 14px 40px 60px; }
+
+/* ---------- 共通の部品 ---------- */
+.card { background: var(--card-bg); border: 0; border-radius: var(--radius); box-shadow: var(--shadow); }
+.btn { border: 1px solid var(--line); background: #fff; border-radius: var(--pill); padding: 9px 20px; color: var(--ink-2); font-weight: 700; font-size: 12px; }
+.btn:hover { border-color: #cfcfcf; }
+.btn-sm { padding: 7px 16px; font-size: 11px; }
+.btn-primary { border: 0; border-radius: var(--pill); padding: 10px 22px; font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  background: var(--grad-orange); color: #fff; box-shadow: 0 3px 10px rgba(247,137,10,.35); }
+.btn-primary:hover { filter: brightness(1.05); color: #fff; }
+.chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 12px; border-radius: var(--pill); color: #fff; background: #b4b4b4; white-space: nowrap; }
+.chip-orange { background: var(--grad-orange); }
+.chip-green { background: var(--grad-green); }
+.chip-blue { background: var(--grad-blue); }
+.chip-red { background: var(--grad-red); }
+.chip-gray { background: #dcdcdc; color: #5f5f5f; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.pad { padding: 18px 24px; }
+.back { display: inline-block; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+.back:hover { color: var(--orange); }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff;
+  padding: 12px 24px; border-radius: var(--pill); font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 60; }
+
+/* ---------- ページ見出し：小さいオレンジ英字＋大きな英字＋日本語 ---------- */
+.phead { display: flex; align-items: flex-end; gap: 20px; margin: 8px 0 20px; flex-wrap: wrap; }
+.phead .title { display: flex; align-items: baseline; gap: 15px; }
+.phead .title .big { font-family: Poppins, sans-serif; font-weight: 700; font-size: 46px; line-height: 1; color: var(--ink); }
+.phead .title h1 { font-size: 19px; }
+.phead .kicker { font-family: Poppins, sans-serif; font-weight: 600; font-size: 12px; color: var(--orange); margin-bottom: 3px; }
+.phead .sub { color: var(--sub); font-size: 12px; padding-bottom: 8px; max-width: 640px; }
+
+/* ---------- 集計（上に4pxの帯。低く作って一覧を多く見せる） ---------- */
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat { position: relative; overflow: hidden; display: block; text-align: left; padding: 12px 18px; color: var(--ink); border: 0; }
+.stat::before { content: ""; position: absolute; inset: 0 0 auto; height: 4px; background: var(--ink); }
+.stat.accent::before { background: var(--grad-orange); }
+button.stat:hover { box-shadow: var(--shadow-hover); }
+.stat.on { box-shadow: inset 0 0 0 2px var(--ink), var(--shadow); }
+.stat .k { display: block; font-family: Poppins, "Zen Kaku Gothic New", sans-serif; font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--ink-2); }
+.stat.accent .k { color: var(--orange); }
+.stat .n { display: block; font-size: 26px; color: var(--ink); line-height: 1.15; margin-top: 2px; }
+.stat .u { font-size: 16px; margin-left: 2px; font-weight: 700; font-family: "Zen Kaku Gothic New", sans-serif; }
+.stat .l { display: block; font-size: 12px; color: var(--sub); margin-top: 4px; line-height: 1.5; }
+/* いちばん注意してほしい1枚だけ、面をオレンジにする */
+.stat.alert { background: var(--grad-orange); }
+.stat.alert::before { background: transparent; }
+.stat.alert .k, .stat.alert .n { color: #fff; }
+.stat.alert .l { color: rgba(255,255,255,.92); }
+
+/* ---------- 一覧：カード（1件1枚） ---------- */
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(265px, 1fr)); gap: 10px; }
+.pcard { display: block; padding: 12px 14px; color: var(--ink); min-width: 0; }
+.pcard:hover { color: var(--ink); box-shadow: var(--shadow-hover); }
+.pcard .row1 { display: flex; align-items: center; gap: 10px; }
+.pcard .who { min-width: 0; flex: 1; }
+.pname { font-size: 16px; font-weight: 700; letter-spacing: .04em; }
+.pname a { color: var(--ink); }
+.paddr { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.pcard .pname { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .paddr { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .row1 .chip { flex: none; }
+/* 日付は「小さいラベル＋太い数字」を1行に畳む */
+.cdates { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; font-size: 11px; color: var(--muted); }
+.cdates b { font-size: 12px; color: var(--ink-2); }
+.cdates .hl b { color: var(--amber-ink); }
+.cdates .late b { color: var(--red); }
+.nowph { margin-top: 7px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nowph b { color: var(--ink); letter-spacing: .04em; }
+.note-pill { margin-top: 7px; font-size: 11px; color: var(--amber-ink); background: var(--amber-soft); border-radius: var(--pill); padding: 2px 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 進み具合：一覧はバー、詳細の見出しはリング */
+.meter2 { height: 8px; background: #e7e7e7; border-radius: var(--pill); overflow: hidden; }
+.meter2 i { display: block; height: 100%; background: var(--grad-orange); transition: width .2s; }
+.ring { position: relative; flex: none; margin-left: auto; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+.ring .v { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: Poppins, sans-serif; font-weight: 700; font-size: 15px; color: var(--ink); line-height: 1; }
+.ring .v i { font-size: 9px; font-style: normal; margin-left: 1px; }
+
+/* ---------- 一覧：テキスト（1行ずつ白い帯が浮く表） ---------- */
+.plist { overflow-x: auto; background: transparent; box-shadow: none; }
+.plist table { width: 100%; border-collapse: separate; border-spacing: 0 12px; min-width: 900px; }
+.plist th { text-align: left; font-weight: 600; font-size: 11px; color: var(--muted); padding: 0 24px 2px; background: transparent; }
+.plist td { padding: 16px 24px; background: #fff; vertical-align: middle; box-shadow: var(--shadow); white-space: nowrap; }
+.plist td:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.plist td:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.plist tr.row { cursor: pointer; }
+.plist tr.row:hover td { background: #fffdf9; }
+.plist td > .chip { justify-self: start; }
+
+/* ---------- 詳細の見出し・区切り（フェーズ） ---------- */
+.flowhead { padding: 14px 20px; margin-bottom: 10px; }
+.flowhead .row1 { display: flex; align-items: center; gap: 12px; }
+.flowhead h1 { font-size: 21px; letter-spacing: .06em; }
+.dates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.dates .d { background: #fafafa; border-radius: 14px; padding: 8px 12px; }
+.dates .k { display: block; font-size: 10px; color: var(--muted-2); letter-spacing: .04em; }
+.dates b { font-family: Poppins, "Zen Kaku Gothic New", sans-serif; font-size: 15px; letter-spacing: .02em; }
+.dates .hand { background: var(--grad-orange); }
+.dates .hand .k { color: rgba(255,255,255,.88); }
+.dates .hand b { color: #fff; }
+.section { margin-bottom: 14px; overflow: hidden; }
+.section-h { display: flex; align-items: center; gap: 12px; padding: 15px 24px; background: #fafafa; }
+.section-h .t { font-weight: 700; font-size: 15px; letter-spacing: .06em; }
+.section-h .prog { margin-left: auto; font-size: 12px; color: var(--muted); font-family: Poppins, sans-serif; font-weight: 700; }
+.items { list-style: none; margin: 0; padding: 0; }
+.items > li { padding: 14px 24px; border-top: 1px solid var(--line-2); }
+
+/* ---------- サイドメニュー（右から開く「表示設定」） ---------- */
+.list-menu-button { display: inline-flex; align-items: center; gap: 10px; border: 0; border-radius: var(--pill);
+  padding: 11px 18px; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.list-menu-button:hover { background: #414650; }
+.topbar .top-list-menu { margin-left: auto; padding: 10px; border-radius: 8px; background: transparent; color: var(--ink-2); box-shadow: none; }
+.topbar .top-list-menu:hover { background: rgba(0,0,0,.045); color: var(--ink); }
+.menu-lines { display: grid; gap: 4px; width: 18px; }
+.menu-lines i { display: block; width: 18px; height: 2px; border-radius: 2px; background: currentColor; }
+.list-drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(20,20,20,.38); }
+.list-drawer { position: fixed; z-index: 41; top: 0; right: 0; bottom: 0; width: min(380px, 100vw);
+  padding: max(22px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  background: #fff; box-shadow: -12px 0 34px rgba(0,0,0,.15); overflow-y: auto;
+  transform: translateX(105%); transition: transform .24s ease, visibility 0s .24s; visibility: hidden; }
+.list-drawer.open { transform: translateX(0); visibility: visible; transition: transform .24s ease; }
+.list-drawer-open { overflow: hidden; }
+.list-drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.list-drawer-head strong { font-size: 20px; letter-spacing: .04em; }
+.list-drawer-close { border: 0; border-radius: 50%; width: 38px; height: 38px; background: #f4f4f4; font-size: 25px; line-height: 1; color: var(--ink); }
+.drawer-controls { display: grid; gap: 22px; margin: 0 0 24px; }
+.drawer-field { display: grid; gap: 9px; min-width: 0; }
+.drawer-field label, .drawer-label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.drawer-controls .pick, .drawer-controls .search { width: 100%; margin: 0; padding: 13px 15px;
+  border: 1px solid var(--line); border-radius: 12px; background: #fafafa; font-size: 14px; }
+.seg { display: inline-flex; gap: 8px; }
+.seg button { border: 0; background: #fff; border-radius: var(--pill); padding: 9px 22px; color: #555; font-size: 12px; font-weight: 700; }
+.seg button.on { background: var(--ink); color: #fff; }
+.drawer-controls .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.drawer-controls .seg-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.drawer-controls .seg button { border: 1px solid var(--line); padding: 12px 6px; white-space: nowrap; }
+.drawer-controls .seg button.on { border-color: var(--ink); }
+.list-drawer-refresh { width: 100%; border: 0; border-radius: 12px; padding: 14px 18px; background: var(--grad-orange); color: #fff; font-weight: 700; }
+.list-drawer-refresh:disabled { opacity: .55; cursor: wait; }
+.drawer-msg { margin: 12px 0 0; font-size: 12px; padding: 10px 14px; border-radius: 12px; }
+.drawer-msg.done { background: var(--green-soft); color: var(--green); }
+.drawer-msg.error { background: var(--red-soft); color: var(--red); }
+
+/* ---------- 入力フォーム（申込・編集など） ---------- */
+.field { display: grid; gap: 8px; margin-bottom: 18px; }
+.field > label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.input { width: 100%; padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fafafa; font-size: 16px; }
+.input:focus { outline: 2px solid var(--orange); outline-offset: 1px; background: #fff; }
+
+/* ---------- タブレット ---------- */
+@media (min-width: 761px) and (max-width: 1099px) {
+  .pgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .pcard { padding: 11px 13px; }
+  .pcard .pname { font-size: 14px; }
+}
+@media (max-width: 1100px) {
+  .app { padding: 12px 16px 40px; }
+  .topbar { padding: 0 16px; gap: 16px; }
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- 携帯 ---------- */
+@media (max-width: 760px) {
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .app { padding: 10px 14px 60px; }
+  /* 上部バー：1段目にロゴと三本線、2段目にメニュー */
+  .topbar { height: auto; padding: 8px 14px 0; gap: 8px 12px; flex-wrap: wrap; }
+  .sync { font-size: 11px; gap: 8px; order: 2; margin-left: 0; }
+  .sync span { display: none; }
+  .nav { order: 3; width: 100%; margin: 0 -14px; padding: 2px 14px 6px; -webkit-overflow-scrolling: touch; }
+  .nav a { font-size: 14px; padding: 7px 10px 6px; }
+  .list-menu-button { padding: 10px 12px; min-height: 42px; }
+  .list-menu-button > span:last-child { display: none; }
+  .topbar .top-list-menu { order: 2; margin-left: auto; }
+  .list-drawer { width: min(360px, 92vw); }
+  /* 見出し：大きな英字はPC用 */
+  .phead { gap: 8px; margin: 4px 0 14px; align-items: center; }
+  .phead .title .big { display: none; }
+  .phead .title h1 { font-size: 21px; letter-spacing: .04em; }
+  .phead .kicker { font-size: 11px; margin-bottom: 1px; }
+  .phead .sub { font-size: 12px; line-height: 1.6; padding-bottom: 0; }
+  .btn { padding: 10px 18px; font-size: 13px; }
+  .btn-sm { padding: 9px 16px; font-size: 12px; }
+  /* 集計は横並びのまま小さく畳む（中央ぞろえ） */
+  .summary { gap: 6px; margin-bottom: 12px; }
+  .stat { padding: 10px 7px; border-radius: 14px; text-align: center; }
+  .stat .n { font-size: 19px; letter-spacing: 0; }
+  .stat .u { font-size: 9px; margin-left: 1px; }
+  .stat .l { font-size: 9.5px; line-height: 1.35; margin-top: 3px; }
+  /* カードは2列。1枚が狭いので文字と余白を一段小さく */
+  .pgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pcard { padding: 10px 11px; }
+  .pcard .row1 { gap: 6px; }
+  /* 状態ラベルは名前の上へ（横に並べると2列では名前がほぼ切れる）。リングは横のまま */
+  .pcard .row1:has(> .chip) { flex-direction: column-reverse; align-items: flex-start; gap: 5px; }
+  .pcard .row1:has(> .chip) .who { width: 100%; }
+  .pcard .pname { font-size: 13.5px; letter-spacing: 0; }
+  .pcard .paddr { font-size: 10px; }
+  .cdates { gap: 4px 8px; font-size: 10px; margin: 6px 0 5px; }
+  .cdates b { font-size: 11px; }
+  .cdates .wk { display: none; }
+  .nowph { margin-top: 6px; font-size: 10.5px; }
+  .note-pill { font-size: 10px; padding: 2px 8px; }
+  .ring .v { font-size: 10.5px; }
+  .ring .v i { font-size: 7px; }
+  /* テキスト表示：1行＝1枚のカードに積み替え、項目名を左に出す */
+  .plist table { min-width: 0; border-spacing: 0 10px; }
+  .plist thead { display: none; }
+  .plist tr.row { display: block; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 10px; }
+  .plist td { display: block; padding: 0; background: transparent; box-shadow: none; border-radius: 0 !important; white-space: normal; }
+  .plist td[data-l] { display: grid; grid-template-columns: 46px minmax(0, 1fr); column-gap: 10px; align-items: baseline; }
+  .plist td[data-l]::before { content: attr(data-l); grid-column: 1; font-size: 11px; font-weight: 700; color: var(--muted); }
+  .plist td[data-l] > * { grid-column: 2; min-width: 0; }
+  .plist td:not(:first-child) { margin-top: 5px; }
+  /* 詳細 */
+  .flowhead { padding: 12px 16px; margin-bottom: 8px; }
+  .flowhead h1 { font-size: 18px; }
+  .dates { gap: 6px; margin-top: 10px; }
+  .dates .d { padding: 7px 9px; border-radius: 12px; }
+  .dates b { font-size: 13px; }
+  .section-h { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  .items > li { padding: 12px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .list-drawer, .meter2 i { transition: none; }
+}
