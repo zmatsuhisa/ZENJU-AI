@@ -13,7 +13,7 @@
 詳しい使い方とファイル構成は `README.md`、MARKUP の実験の経緯と数字は `research/README.md`。
 
 ## はじめにやること
-1. `cd gran-shogo && npm install && npm test`（12件すべて通ることを確認）
+1. `cd gran-shogo && npm install && npm test`（17件すべて通ることを確認）
 2. `npm start` → http://127.0.0.1:3985/ → 「架空のサンプル資料で試す」
 3. テスト用図面を用意して採点（下の「精度の測り方」）
 
@@ -52,3 +52,5 @@
 ## 公開しているもの
 - スマホで開ける版：claude.ai の Artifact（依頼者のアカウントで公開。更新は依頼者に `scripts/build_artifact.py` で作ったフォルダを渡して頼む）
 - GitHub：`zmatsuhisa/ZENJU-AI`。ブランチ `claude/gran-shogo` → PR #1（下書き）
+- 1ファイル版（Claude もサーバーもいらない。社内の業務改善の画面に置いて少人数で試す用）：`python3 scripts/build_single_html.py <出力先>/資料照合.html`
+  AI照合は外してあり、記録はそのブラウザの中だけ。部品（pdf.js・SheetJS・OpenCV.js）は jsDelivr から読む
