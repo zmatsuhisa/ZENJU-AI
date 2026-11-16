@@ -112,3 +112,14 @@ test('同じ名前の金物は同じ色（半角・全角の違いは同じと�
   assert.equal(new Set([c['ろ'], c['に'], c['と']]).size, 3);
   assert.equal(c['ち'], NONE);
 });
+
+test('表のすぐ左にある図面の字は表に入れない（色の帯を図面の上まで伸ばさない）', () => {
+  const page = samplePage();
+  // 「ろ」の行と同じ高さ、表の左 30pt に図面の記号（金物記号の大きさ）
+  page.push({ ...T('へ', 570, 432, 4.4), page: 0 }, { ...T('へ', 570, 424, 4.4), page: 0 });
+  const lg = findLegend(page, segs);
+  assert.ok(lg.box.x0 >= 585, `表の左端 ${lg.box.x0}`);
+  const f = findMarks([{ glyphs: page }], lg);
+  assert.equal(f.marks.filter((g) => g.x === 570).length, 0); // 「へ」はリストにないので塗らないが、表の字にもしない
+  assert.equal(f.unknown.filter((g) => g.x === 570).length, 2);
+});

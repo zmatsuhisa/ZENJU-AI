@@ -88,8 +88,13 @@ function readLegendUnder(title, glyphs, segs) {
   }
   const rows = [];
   let x1 = head.x + head.w, x0 = Math.min(head.x, title.x);
+  // 表の左右の端：左は見出し（●柱脚柱頭金物リスト）の左端、右は見出し行の字（番号・記号・名称・引張・せん断）の右端。
+  // これより外の字は、同じ高さにあっても図面の字なので表に入れない
+  const headRow = glyphs.filter((o) => o.cy < title.cy - 2 && o.cy > head.cy - rowH * 0.5 && o.x >= title.x - 12 && o.x < title.x + 400);
+  const tableL = Math.min(title.x, head.x) - 12;
+  const tableR = Math.max(head.x + head.w, ...headRow.map((o) => o.x + o.w)) + 12;
   for (const g of rowsG) {
-    const same = glyphs.filter((o) => o !== g && Math.abs(o.cy - g.cy) < rowH * 0.42 && o.cy > limitY);
+    const same = glyphs.filter((o) => o !== g && Math.abs(o.cy - g.cy) < rowH * 0.42 && o.cy > limitY && o.x >= tableL && o.x + o.w <= tableR);
     // 表の中の字だけ：記号から左右へ、間が大きくあく（＝表の外の図面に出る）までの字
     const reach = Math.max(rowH * 4, 70);
     const right = chain(same.filter((o) => o.x > g.x + g.w - 1).sort((p, q) => p.x - q.x), g.x + g.w, reach, 1);
