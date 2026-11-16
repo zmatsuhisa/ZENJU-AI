@@ -197,19 +197,37 @@ export function splitCluster(segs) {
   const n = segs.length;
   const parent = segs.map((_, i) => i);
   const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  // 点ごとに、そこを端にする線を集める。3本までが集まる点でつなぐ（4本以上が集まる点は、2つの記号が角で
-  // 接しているところかもしれないのでつながない。三角や丸はほかの角でつながっているので、ばらばらにはならない）
-  const pt = new Map();
+  // 1) 端と端がぴったり同じ点でつなぐ。3本までが集まる点だけ（4本以上が集まる点は、2つの記号が角で接している
+  //    ところかもしれないのでつながない。三角や丸はほかの角でつながっているので、ばらばらにはならない）
   const k = (x, y) => Math.round(x * 20) + ',' + Math.round(y * 20);
+  const pt = new Map();
   segs.forEach((s, i) => {
-    for (const key of [k(s[0], s[1]), k(s[2], s[3])]) {
-      if (!pt.has(key)) pt.set(key, []);
-      pt.get(key).push(i);
+    for (const [x, y] of [[s[0], s[1]], [s[2], s[3]]]) {
+      const key = k(x, y);
+      if (!pt.has(key)) pt.set(key, { x, y, list: [] });
+      pt.get(key).list.push(i);
     }
   });
-  for (const list of pt.values()) {
-    if (list.length > 3) continue;
-    for (let j = 1; j < list.length; j++) { const a = find(list[0]), b = find(list[j]); if (a !== b) parent[a] = b; }
+  for (const nd of pt.values()) {
+    if (nd.list.length > 3) continue;
+    for (let j = 1; j < nd.list.length; j++) { const a = find(nd.list[0]), b = find(nd.list[j]); if (a !== b) parent[a] = b; }
+  }
+  // 2) 相手のいない端（丸がいくつかの弧に分けて描かれたときの切れ目など）は、0.35pt 以内のほかの切れ目とつなぐ
+  const TOL = 0.35, CELL = 0.5;
+  const loose = [...pt.values()].filter((nd) => nd.list.length === 1);
+  const grid = new Map();
+  for (const nd of loose) {
+    const gx = Math.floor(nd.x / CELL), gy = Math.floor(nd.y / CELL);
+    for (let i = gx - 1; i <= gx + 1; i++) for (let j = gy - 1; j <= gy + 1; j++) {
+      for (const o of grid.get(i + ',' + j) || []) {
+        if (Math.hypot(o.x - nd.x, o.y - nd.y) > TOL) continue;
+        const a = find(o.list[0]), b = find(nd.list[0]);
+        if (a !== b) parent[a] = b;
+      }
+    }
+    const key = gx + ',' + gy;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(nd);
   }
   const comps = new Map();
   for (let i = 0; i < n; i++) { const r = find(i); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(segs[i]); }

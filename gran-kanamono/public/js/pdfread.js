@@ -91,9 +91,13 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
   let wallLegend = null;
   for (let i = 0; i < pages.length && !wallLegend; i++) wallLegend = findWallLegend(pages[i].glyphs, segs[i], i);
   const found = legend ? findMarks(pages, legend) : null;
+  // 壁の記号は伏図（平面）にしか出てこない。「伏図」とあるページだけで探す（詳細図の溶接の三角などを拾わないように）。
+  // どのページにも「伏図」がなければ全ページで探す
+  const planPages = pages.map((p) => p.glyphs.some((g) => /伏\s*図/.test(g.s)));
+  const usePage = (i) => !planPages.some(Boolean) || planPages[i];
   const walls = wallLegend ? {
     legend: wallLegend,
-    marks: findWallMarks(segs.map((s) => ({ segs: s })), wallLegend, {
+    marks: findWallMarks(segs.map((s, i) => ({ segs: usePage(i) ? s : [] })), wallLegend, {
       exclude: excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes),
     }),
   } : null;

@@ -119,3 +119,20 @@ test('くっついた図形を部品に分ける：内側の線は外側の図�
   const parts = splitCluster([...filledDiamond(0, 0, 10, 5), ...tri(9.5, 2.25, 9, 4.5, 2)]);
   assert.equal(parts.length, 2);
 });
+
+test('いくつかの弧に分けて描かれた丸（弧の間にごく小さなすき間）も1つの記号にまとめ、横の三角とは分ける', () => {
+  // 半径5の丸を4つの弧（短い線の集まり）で描き、弧と弧の間を 0.24pt あける。中に塗りつぶしの三角、右に片筋かいの三角
+  const circle = [];
+  for (let q = 0; q < 4; q++) {
+    const a0 = q * Math.PI / 2 + 0.03, a1 = (q + 1) * Math.PI / 2 - 0.03;
+    for (let i = 0; i < 12; i++) {
+      const t0 = a0 + (a1 - a0) * i / 12, t1 = a0 + (a1 - a0) * (i + 1) / 12;
+      circle.push([5 * Math.cos(t0), 5 * Math.sin(t0), 5 * Math.cos(t1), 5 * Math.sin(t1)]);
+    }
+  }
+  const inner = poly([[-2.5, -3], [3.5, 0], [-2.5, 3]]);
+  for (let x = -2.3; x < 3.3; x += 0.3) { const h = 3 * (3.5 - x) / 6; inner.push([x, -h, x, h]); }
+  const parts = splitCluster([...circle, ...inner, ...tri(9, 0, 4, 7, 1)]);
+  assert.equal(parts.length, 2);
+  assert.ok(parts.some((p) => p.segs.length === circle.length + inner.length));
+});
