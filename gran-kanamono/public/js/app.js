@@ -2,7 +2,7 @@
 // 流れ：1 図面を選ぶ → 2 金物リスト・壁の表で記号ごとの色を決める（設定）→ 3 図面全体の同じ記号に同じ色をつけて、PDFで保存
 import * as pdfjs from '../vendor/pdf.min.mjs';
 import * as PDFLib from '../vendor/pdf-lib.esm.min.js';
-import { PALETTE, NONE, colorHex, countBySymbol, defaultColors, buildPaint, ALPHA, WALL_ORDER } from './core.js';
+import { PALETTE, NONE, colorHex, countBySymbol, defaultColors, buildPaint, ALPHA, WALL_ORDER, colorGroup } from './core.js';
 import { countByKey, buildWallPaint } from './walls.js';
 import { analyze } from './pdfread.js';
 import { paintPdf } from './paint.js';
@@ -12,7 +12,7 @@ const PDF_OPTS = {
   cMapUrl: new URL('../vendor/cmaps/', import.meta.url).href, cMapPacked: true,
   standardFontDataUrl: new URL('../vendor/standard_fonts/', import.meta.url).href,
 };
-const STORE = 'gran-kanamono.colors';
+const STORE = 'gran-kanamono.colors.v2'; // v2：同じ名前の金物を1色にまとめた（前の色分けは使わない）
 const PLAN_SCALE = 2.2; // 図面の下書き表示の細かさ（拡大しても記号が読める程度）
 
 const $ = (id) => document.getElementById(id);
@@ -157,14 +157,14 @@ function groups() {
     const cnt = countBySymbol(st.found.marks);
     out.push({
       id: 'kana', head: '金物リスト', page: st.legend.page, title: st.legend.title, box: st.legend.box, rowH: st.legend.rowH,
-      rows: st.legend.rows.map((r) => ({ key: r.s, text: r.s, name: r.name || '（名前なし）', sub: r.kn != null ? `引張 ${r.kn} kN` : '', struck: r.struck, n: cnt.get(r.s) || 0 })),
+      rows: st.legend.rows.map((r) => ({ src: r, key: r.s, text: r.s, name: r.name || '（名前なし）', sub: r.kn != null ? `引張 ${r.kn} kN` : '', struck: r.struck, n: cnt.get(r.s) || 0 })),
     });
   }
   if (st.walls) {
     const L = st.walls.legend, cnt = countByKey(st.walls.marks);
     out.push({
       id: 'kabe', head: '壁（筋かい・面材）', page: L.page, title: L.title, box: L.box, rowH: L.rowH,
-      rows: L.rows.map((r) => ({ key: r.key, symbol: r.symbol, name: r.label || '（名前なし）', sub: r.rate != null ? `壁倍率 ${r.rate}` : '', struck: r.struck, n: cnt.get(r.key) || 0 })),
+      rows: L.rows.map((r) => ({ src: r, key: r.key, symbol: r.symbol, name: r.label || '（名前なし）', sub: r.rate != null ? `壁倍率 ${r.rate}` : '', struck: r.struck, n: cnt.get(r.key) || 0 })),
     });
   }
   return out;
@@ -231,6 +231,12 @@ $('legend-groups').addEventListener('click', (e) => {
   if (!b) return;
   if (b.dataset.open) { st.open = st.open === b.dataset.open ? null : b.dataset.open; renderRows(); return; }
   if (b.dataset.c) {
+    // 同じ名前の行（フックコーナーの ろ・は など）はまとめて同じ色にする
+    for (const g of groups()) {
+      const row = g.rows.find((r) => r.key === b.dataset.k);
+      if (!row) continue;
+      for (const r of g.rows) if (!r.struck && colorGroup(r.src) === colorGroup(row.src)) st.colors[r.key] = b.dataset.c;
+    }
     st.colors[b.dataset.k] = b.dataset.c;
     st.open = null;
     saveColors(); renderRows(); redrawAll(); renderSummary();

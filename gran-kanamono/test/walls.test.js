@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { toGlyph } from '../public/js/core.js';
-import { findWallLegend, findWallMarks, clusterSegments, rasterize, similarity, excludeZones, countByKey, dropDashes } from '../public/js/walls.js';
+import { findWallLegend, findWallMarks, clusterSegments, rasterize, similarity, excludeZones, countByKey, dropDashes, splitCluster } from '../public/js/walls.js';
 
 const T = (str, x, y, size = 6) => ({ ...toGlyph({ str, transform: [size, 0, 0, size, x, y], width: size * [...str].length }), page: 0 });
 const poly = (pts) => pts.map((p, i) => [...p, ...pts[(i + 1) % pts.length]]);
@@ -101,4 +101,21 @@ test('点線の短い線だけを取り除き、記号の線は残す', () => {
   const dashes = [[0, 0, 1.4, 0], [2.8, 0, 4.2, 0], [5.6, 0, 7, 0]];
   const t = tri(20, 20, 9, 4.5);
   assert.equal(dropDashes([...dashes, ...t]).length, t.length);
+});
+
+test('記号どうしがくっついて描かれていても、1つずつ見つける（塗りつぶしのひし形に片筋かいの三角がくっつく）', () => {
+  const { glyphs, segs } = sample();
+  const wl = findWallLegend(glyphs, segs);
+  // ひし形（横向き・塗りつぶし）の右の角に、片筋かいの三角の角がくっついている
+  const glued = [...filledDiamond(500, 300, 10, 5), ...tri(509.5, 302.25, 9, 4.5, 2)];
+  const marks = findWallMarks([{ segs: [...segs, ...glued] }], wl, { exclude: { 0: [wl.box] } });
+  const near = marks.filter((m) => m.cx > 490 && m.cx < 520 && m.cy > 290 && m.cy < 310);
+  assert.equal(near.length, 2);
+  assert.ok(near.some((m) => m.key === wl.rows[0].key)); // 片筋かい
+  assert.ok(near.some((m) => m.key === wl.rows[2].key)); // 塗りつぶしのひし形
+});
+
+test('くっついた図形を部品に分ける：内側の線は外側の図形と同じ記号にまとめる', () => {
+  const parts = splitCluster([...filledDiamond(0, 0, 10, 5), ...tri(9.5, 2.25, 9, 4.5, 2)]);
+  assert.equal(parts.length, 2);
 });

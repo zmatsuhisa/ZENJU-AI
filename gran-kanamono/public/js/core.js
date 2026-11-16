@@ -178,11 +178,15 @@ export function countBySymbol(marks) {
 
 /**
  * はじめの色分け。保存してある色（記号→色）を優先し、ないものは上の行から順に色を配る。
- * 斜線の行（使わない金物）は「塗らない」。
+ * 同じ名前の行は同じ色。斜線の行（使わない金物）は「塗らない」。
  */
+/** 同じ色にまとめる名前（半角・全角や空白の違いは同じとみなす）。名前のない行は記号ごと */
+export const colorGroup = (r) => (r.name ? 'n:' + r.name.normalize('NFKC').replace(/\s+/g, '') : 'k:' + (r.key ?? r.s));
+
 export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id), taken = []) {
   const out = {};
   const keyOf = (r) => r.key ?? r.s;
+  const byGroup = new Map(); // 同じ名前の金物（フックコーナー・シナコーナーなど）は同じ色
   const used = new Set([...taken, ...rows.map((r) => saved[keyOf(r)]).filter(Boolean)]);
   let k = 0;
   const next = () => {
@@ -193,9 +197,11 @@ export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id)
     return order[k++ % order.length];
   };
   for (const r of rows) {
-    const key = keyOf(r);
+    const key = keyOf(r), grp = colorGroup(r);
     if (saved[key] && (saved[key] === NONE || colorHex(saved[key]))) out[key] = saved[key];
-    else out[key] = r.struck ? NONE : next();
+    else if (r.struck) out[key] = NONE;
+    else out[key] = byGroup.get(grp) ?? next();
+    if (!r.struck && out[key] !== NONE && !byGroup.has(grp)) byGroup.set(grp, out[key]);
   }
   return out;
 }
@@ -216,7 +222,7 @@ export function buildPaint(legend, marks, colors) {
     out.push({ kind: 'band', page: legend.page, hex, x0: legend.box.x0 + 1, x1: legend.box.x1 - 1, y0: r.cy - legend.rowH / 2 + 0.8, y1: r.cy + legend.rowH / 2 - 0.8 });
     out.push({ kind: 'legend', page: legend.page, hex, cx: r.cx, cy: r.cy, r: legend.rowH * 0.44 });
   }
-  // 記号の丸（ひとまわり大きく）。同じ記号が近くに並ぶとき（柱の上下など）は、重なって色が濃くならないように
+  // 記号の丸（ひとまわり大きく）。同じ色の記号が近くに並ぶとき（柱の上下など）は、重なって色が濃くならないように
   // 1つの楕円にまとめる
   const R = (g) => g.size * MARK_SCALE;
   const groups = [];
@@ -224,7 +230,7 @@ export function buildPaint(legend, marks, colors) {
     const hex = colorHex(colors[g.s]);
     if (rowOf.get(g.s)?.struck) out.push({ kind: 'warn', page: g.page, hex: '#E0001B', cx: g.cx, cy: g.cy, r: R(g) + 1.6 });
     if (!hex) continue;
-    const near = groups.find((k) => k.page === g.page && k.s === g.s && k.items.length < 2
+    const near = groups.find((k) => k.page === g.page && k.hex === hex && k.items.length < 2
       && Math.hypot(k.items[0].cx - g.cx, k.items[0].cy - g.cy) < R(g) * 2);
     if (near) near.items.push(g); else groups.push({ page: g.page, s: g.s, hex, items: [g] });
   }

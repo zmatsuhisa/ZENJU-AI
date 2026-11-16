@@ -188,6 +188,43 @@ export function excludeZones(glyphsByPage, tables, pageSizes = []) {
   return ex;
 }
 
+/**
+ * くっついた図形を記号ごとに分ける。
+ * 端と端がつながっている線を1つの部品にし、ほかの部品の内側にすっぽり入る部品（丸の中の三角、塗りつぶしの線など）は
+ * その部品と同じ記号とする。
+ */
+export function splitCluster(segs) {
+  const n = segs.length;
+  const parent = segs.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  // 点ごとに、そこを端にする線を集める。3本までが集まる点でつなぐ（4本以上が集まる点は、2つの記号が角で
+  // 接しているところかもしれないのでつながない。三角や丸はほかの角でつながっているので、ばらばらにはならない）
+  const pt = new Map();
+  const k = (x, y) => Math.round(x * 20) + ',' + Math.round(y * 20);
+  segs.forEach((s, i) => {
+    for (const key of [k(s[0], s[1]), k(s[2], s[3])]) {
+      if (!pt.has(key)) pt.set(key, []);
+      pt.get(key).push(i);
+    }
+  });
+  for (const list of pt.values()) {
+    if (list.length > 3) continue;
+    for (let j = 1; j < list.length; j++) { const a = find(list[0]), b = find(list[j]); if (a !== b) parent[a] = b; }
+  }
+  const comps = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(segs[i]); }
+  // 大きい部品から順に、内側に入る部品をまとめる
+  const list = [...comps.values()].map((g) => ({ segs: g, box: boxOf(g) }))
+    .sort((p, q) => (q.box.x1 - q.box.x0) * (q.box.y1 - q.box.y0) - (p.box.x1 - p.box.x0) * (p.box.y1 - p.box.y0));
+  const out = [];
+  for (const c of list) {
+    const host = out.find((o) => c.box.x0 >= o.box.x0 - 0.3 && c.box.x1 <= o.box.x1 + 0.3 && c.box.y0 >= o.box.y0 - 0.3 && c.box.y1 <= o.box.y1 + 0.3);
+    if (host) host.segs.push(...c.segs);
+    else out.push({ segs: [...c.segs], box: c.box });
+  }
+  return out;
+}
+
 const N = 24; // 形を比べるときのます目の数
 
 /**
@@ -208,13 +245,18 @@ export function rasterize(segs, box, t = 0) {
     const j = Math.min(N - 1, Math.max(0, Math.floor((v / hh + 1) / 2 * N)));
     g[j * N + i] = 1;
   };
-  const unit = Math.min(hw, hh) * 2 / N;
   for (const s of segs) {
-    const steps = Math.max(1, Math.ceil(len(s) / unit));
+    // ます目1つにつき2点ほど（横と縦の引き伸ばしが違うので、それぞれの向きで数える）
+    const dx = Math.abs(s[2] - s[0]), dy = Math.abs(s[3] - s[1]);
+    const bw = (box.x1 - box.x0) || 0.01, bh = (box.y1 - box.y0) || 0.01;
+    const steps = Math.min(4 * N, Math.max(1, Math.ceil(Math.max(dx / bw, dy / bh) * N * 2)));
     for (let k = 0; k <= steps; k++) put(s[0] + (s[2] - s[0]) * k / steps, s[1] + (s[3] - s[1]) * k / steps);
   }
   return g;
 }
+
+/** ます目のうち線のある割合 */
+function density(g) { let n = 0; for (const v of g) n += v; return n / g.length; }
 
 function dilate(g) {
   const o = new Uint8Array(N * N);
@@ -229,8 +271,7 @@ function dilate(g) {
 }
 
 /** 2つの形の似ている度合い（0〜1）。線の位置が1ます以内で重なる割合を両方向で見る */
-export function similarity(a, b, bDil = dilate(b)) {
-  const aDil = dilate(a);
+export function similarity(a, b, bDil = dilate(b), aDil = dilate(a)) {
   let na = 0, nb = 0, ha = 0, hb = 0;
   for (let k = 0; k < N * N; k++) {
     if (a[k]) { na++; if (bDil[k]) ha++; }
@@ -248,7 +289,7 @@ export function makeTemplates(wallLegend) {
     const minor = Math.min(b.x1 - b.x0, b.y1 - b.y0);
     const rasters = [];
     for (let t = 0; t < 8; t++) { const g = rasterize(r.symbol.segs, b, t); rasters.push({ g, d: dilate(g) }); }
-    return { key: r.key, size, aspect: minor / (size || 1), rasters };
+    return { key: r.key, size, aspect: minor / (size || 1), rasters, density: density(rasters[0].g) };
   });
 }
 
@@ -267,27 +308,53 @@ export function findWallMarks(pages, wallLegend, { exclude = {}, minScore = 0.9,
   const marks = [];
   pages.forEach((p, page) => {
     const ex = exclude[page] || [];
-    for (const c of clusterSegments(dropDashes(p.segs), { maxLen: maxSize * 1.3 })) {
+    const tryMatch = (c) => {
       const w = c.box.x1 - c.box.x0, h = c.box.y1 - c.box.y0;
       const size = Math.max(w, h);
-      if (size < minSize * 0.6 || size > maxSize * 1.4 || c.segs.length < 2) continue;
-      if (ex.some((b) => overlaps(c.box, b))) continue;
+      if (size < minSize * 0.6 || size > maxSize * 1.4 || c.segs.length < 2) return null;
       const aspect = Math.min(w, h) / size;
+      // 大きさと縦横の比が合う見本がなければ、描かずに次へ
+      if (!temps.some((t) => size >= t.size * 0.6 && size <= t.size * 1.4 && Math.abs(aspect - t.aspect) <= 0.22)) return null;
       // 見本ごとに、いちばん似ている向きの点数
       const g = rasterize(c.segs, c.box);
+      const gDil = dilate(g);
       const scored = [];
       for (const t of temps) {
         if (size < t.size * 0.6 || size > t.size * 1.4) continue;
         if (Math.abs(aspect - t.aspect) > 0.22) continue;
+        // 線の混み具合（ます目のうち線のある割合）が大きく違うものは別の記号（塗りつぶしと重ね線など）
+        const dens = density(g);
+        if (dens > t.density * 1.45 || dens < t.density / 1.45) continue;
         let sc = 0;
-        for (const r of t.rasters) sc = Math.max(sc, similarity(g, r.g, r.d));
+        for (const r of t.rasters) sc = Math.max(sc, similarity(g, r.g, r.d, gDil));
         scored.push({ key: t.key, score: sc });
       }
       scored.sort((p, q) => q.score - p.score);
       const best = scored[0];
       // 2番目に似た記号と差がほとんどないものは、どちらか決められないので塗らない
-      if (best && best.score >= minScore && !(scored[1] && best.score - scored[1].score < margin)) {
-        marks.push({ key: best.key, page, box: c.box, cx: (c.box.x0 + c.box.x1) / 2, cy: (c.box.y0 + c.box.y1) / 2, size, score: best.score });
+      if (!best || best.score < minScore || (scored[1] && best.score - scored[1].score < margin)) return null;
+      return { key: best.key, page, box: c.box, cx: (c.box.x0 + c.box.x1) / 2, cy: (c.box.y0 + c.box.y1) / 2, size, score: best.score };
+    };
+    for (const c of clusterSegments(dropDashes(p.segs), { maxLen: maxSize * 1.3 })) {
+      if (ex.some((b) => overlaps(c.box, b))) continue;
+      const size = Math.max(c.box.x1 - c.box.x0, c.box.y1 - c.box.y0);
+      if (size < minSize * 0.6 || size > maxSize * 3) continue;
+      const whole = size <= maxSize * 1.4 ? tryMatch(c) : null;
+      if (whole) { marks.push(whole); continue; }
+      // 記号どうしがくっついて描かれている（丸の面材の横に筋かいの三角など）ときは、部品に分けて1つずつ比べる
+      const parts = splitCluster(c.segs);
+      if (parts.length < 2) continue;
+      let left = [];
+      for (const part of parts) { const m = tryMatch(part); if (m) marks.push(m); else left.push(part); }
+      // 組み合わせを比べるのは、記号より小さい部品だけ（数が多いかたまりは比べない。時間がかかりすぎるため）
+      left = left.filter((q) => Math.max(q.box.x1 - q.box.x0, q.box.y1 - q.box.y0) <= maxSize * 1.4);
+      if (left.length > 24) continue;
+      // 合わなかった部品どうしが接していれば、合わせて比べる（たすき掛の2つの三角など）
+      for (let i = 0; i < left.length; i++) for (let j = i + 1; j < left.length; j++) {
+        if (!left[i] || !left[j] || !overlaps(left[i].box, left[j].box, 0.3)) continue;
+        const both = [...left[i].segs, ...left[j].segs];
+        const m = tryMatch({ segs: both, box: boxOf(both) });
+        if (m) { marks.push(m); left[i] = left[j] = null; }
       }
     }
   });

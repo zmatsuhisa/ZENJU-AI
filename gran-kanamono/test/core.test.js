@@ -101,3 +101,14 @@ test('字の中心：横書きと90度回した字', () => {
   const r = toGlyph({ str: 'ろ', transform: [0, 10, -10, 0, 100, 200], width: 10 });
   assert.ok(Math.abs(r.cx - 96.2) < 1e-9 && Math.abs(r.cy - 205) < 1e-9);
 });
+
+test('同じ名前の金物は同じ色（半角・全角の違いは同じとみなす）。斜線の行は塗らない', () => {
+  const rows = [{ s: 'ろ', name: 'フックコーナー' }, { s: 'は', name: 'フックコーナー' }, { s: 'に', name: 'ｼﾅｺｰﾅｰ' },
+    { s: 'ほ', name: 'シナコーナー' }, { s: 'へ', name: 'ｼﾅｺｰﾅｰ' }, { s: 'と', name: 'ｵﾒｶﾞｺｰﾅｰ 15kN' }, { s: 'ち', name: 'ｵﾒｶﾞｺｰﾅｰ 20kN', struck: true }];
+  const c = defaultColors(rows);
+  assert.equal(c['ろ'], c['は']);
+  assert.equal(c['に'], c['ほ']);
+  assert.equal(c['に'], c['へ']);
+  assert.equal(new Set([c['ろ'], c['に'], c['と']]).size, 3);
+  assert.equal(c['ち'], NONE);
+});
