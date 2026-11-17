@@ -4,6 +4,7 @@ import * as pdfjs from '../vendor/pdf.min.mjs';
 import * as PDFLib from '../vendor/pdf-lib.esm.min.js';
 import { PALETTE, NONE, colorHex, countBySymbol, defaultColors, buildPaint, ALPHA, WALL_ORDER, colorGroup } from './core.js';
 import { countByKey, buildWallPaint } from './walls.js';
+import { kisoRows, buildKisoPaint, kisoKey } from './kiso.js';
 import { analyze } from './pdfread.js';
 import { paintPdf } from './paint.js';
 
@@ -17,7 +18,7 @@ const PLAN_SCALE = 2.2; // 図面の下書き表示の細かさ（拡大して�
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const st = { name: '', bytes: null, doc: null, legend: null, found: null, walls: null, colors: {}, views: [], open: null };
+const st = { name: '', bytes: null, doc: null, legend: null, found: null, walls: null, kiso: null, colors: {}, views: [], open: null };
 
 // ---------- 保存してある色（この端末だけ） ----------
 function loadSaved() {
@@ -30,6 +31,11 @@ function initialColors(saved) {
   const c = {};
   if (st.legend) Object.assign(c, defaultColors(st.legend.rows, saved));
   if (st.walls) Object.assign(c, defaultColors(st.walls.legend.rows, saved, WALL_ORDER));
+  // 基礎：現場の手書きに合わせたはじめの色（人通口＝だいだい、開口補強＝桃、ホールダウン＝赤、FG1＝水色…）
+  for (const r of kisoAllRows()) {
+    const sv = saved[r.key];
+    c[r.key] = sv && (sv === NONE || colorHex(sv)) ? sv : (r.struck ? NONE : r.def);
+  }
   return c;
 }
 
@@ -68,18 +74,19 @@ async function openFile(file) {
     st.doc?.destroy();
     // pdf.js は渡したデータを手放すことがあるので、写しを渡す（保存のときに元のデータを使う）
     st.doc = await pdfjs.getDocument({ ...PDF_OPTS, data: st.bytes.slice() }).promise;
-    const { legend, found, walls } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
-    if (!legend && !walls) {
+    const { legend, found, walls, kiso } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
+    if (!legend && !walls && !kiso) {
       fileMsg(`「${file.name}」から「金物リスト」や「軸組みの種類と壁倍率」の表が見つかりませんでした。構造図（金物図）を選んでください。文字や線が画像になっているPDF（スキャンなど）は、今は読めません。`, 'error');
       status('表なし', true);
       return;
     }
-    st.legend = legend; st.found = found; st.walls = walls;
+    st.legend = legend; st.found = found; st.walls = walls; st.kiso = kiso;
     st.colors = initialColors(loadSaved());
     st.open = null;
     drop.classList.add('has');
     drop.querySelector('.drop-main').textContent = '別の図面を選ぶ';
-    const found1 = [legend && `金物リスト（${legend.page + 1}ページ目）`, walls && `壁の表（${walls.legend.page + 1}ページ目）`].filter(Boolean).join('と');
+    const found1 = [legend && `金物リスト（${legend.page + 1}ページ目）`, walls && `壁の表（${walls.legend.page + 1}ページ目）`,
+      kiso?.planPages.length && `基礎伏図（${kiso.planPages.map((p) => p + 1).join('・')}ページ目）`, kiso?.list && `基礎リスト（${kiso.list.page + 1}ページ目）`].filter(Boolean).join('・');
     fileMsg(`「${file.name}」（${st.doc.numPages}ページ）を読みました。${found1}を見つけました。`, 'done');
     await showLegends();
     await showPlan();
@@ -118,11 +125,16 @@ function drawView(view, paint) {
   c.width = view.base.width; c.height = view.base.height;
   const ctx = c.getContext('2d');
   ctx.drawImage(view.base, 0, 0);
-  const order = { band: 0, legend: 1, mark: 2, warn: 3 };
+  const order = { band: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
   for (const p of paint.filter((q) => q.page === view.pageIndex).sort((a, b) => order[a.kind] - order[b.kind])) {
     ctx.save();
     ctx.globalAlpha = ALPHA[p.kind];
-    if (p.kind === 'band') {
+    if (p.kind === 'label') {
+      const [x, y] = view.at(p.x, p.y);
+      ctx.fillStyle = p.hex;
+      ctx.font = `bold ${(p.size || 6) * view.scale}px Poppins, Arial, sans-serif`;
+      ctx.fillText(p.text, x, y);
+    } else if (p.kind === 'band') {
       ctx.globalCompositeOperation = 'multiply';
       const [ax, ay] = view.at(p.x0, p.y0), [bx, by] = view.at(p.x1, p.y1);
       ctx.fillStyle = p.hex;
@@ -131,7 +143,7 @@ function drawView(view, paint) {
       const [x, y] = view.at(p.cx, p.cy);
       ctx.beginPath();
       ctx.ellipse(x, y, (p.rx ?? p.r) * view.scale, (p.ry ?? p.r) * view.scale, 0, 0, Math.PI * 2);
-      if (p.kind === 'warn') { ctx.strokeStyle = p.hex; ctx.lineWidth = Math.max(1.5, 0.9 * view.scale); ctx.stroke(); }
+      if (p.kind === 'warn' || p.kind === 'ring') { ctx.strokeStyle = p.hex; ctx.lineWidth = Math.max(1.2, (p.kind === 'ring' ? 0.8 : 0.9) * view.scale); ctx.stroke(); }
       else { ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = p.hex; ctx.fill(); }
     }
     ctx.restore();
@@ -142,7 +154,19 @@ function currentPaint() {
   const out = [];
   if (st.legend) out.push(...buildPaint(st.legend, st.found.marks, st.colors));
   if (st.walls) out.push(...buildWallPaint(st.walls.legend, st.walls.marks, st.colors, colorHex));
+  if (st.kiso) out.push(...buildKisoPaint(st.kiso, st.colors, colorHex));
   return out;
+}
+
+/** 基礎の行（凡例のホールダウン・人通口、図面にある開口補強・梁符号・スラブ・独立基礎、基礎リストの鉄筋の本数） */
+function kisoAllRows() {
+  if (!st.kiso) return [];
+  const rows = kisoRows(st.kiso.legend, st.kiso.marks, st.kiso.list);
+  if (st.kiso.list) {
+    const n = st.kiso.list.rebars.filter((r) => !r.panel?.unused).length;
+    rows.push({ key: kisoKey('rebar', ''), kind: 'rebar', text: '2-D13', name: '鉄筋の本数（基礎リスト）', struck: false, n, def: 'red', ring: true });
+  }
+  return rows;
 }
 function redrawAll() {
   const paint = currentPaint();
@@ -167,6 +191,14 @@ function groups() {
       rows: L.rows.map((r) => ({ src: r, key: r.key, symbol: r.symbol, name: r.label || '（名前なし）', sub: r.rate != null ? `壁倍率 ${r.rate}` : '', struck: r.struck, n: cnt.get(r.key) || 0 })),
     });
   }
+  if (st.kiso) {
+    const L = st.kiso.legend;
+    const subOf = { hd: 'ホールダウン（番号付き）', w: '人通口', kaiko: '開口補強', fg: '梁符号', slab: 'スラブ', dok: '独立基礎', rebar: '断面の鉄筋の本数に輪' };
+    out.push({
+      id: 'kiso', head: '基礎（基礎伏図・基礎リスト）', page: L ? L.page : st.kiso.list.page, title: L ? L.title : '基礎リスト', box: L ? L.box : null, rowH: 20,
+      rows: kisoAllRows().map((r) => ({ src: r, key: r.key, text: r.text, small: true, name: r.name, sub: subOf[r.kind] || '', struck: r.struck, n: r.n, nLabel: r.kind === 'rebar' ? '基礎リストに' : '図面に' })),
+    });
+  }
   return out;
 }
 
@@ -189,10 +221,11 @@ async function showLegends() {
     el.className = 'legend-group';
     el.innerHTML = `<h3 class="lg-head">${esc(g.head)}<span>${g.page + 1}ページ目「${esc(g.title.replace(/^●/, ''))}」</span></h3>
       <div class="legend-wrap">
-        <div class="legend-view"><canvas aria-label="色をつけた${esc(g.head)}の表"></canvas></div>
+        ${g.box ? `<div class="legend-view"><canvas aria-label="色をつけた${esc(g.head)}の表"></canvas></div>` : '<div class="legend-view muted small pad">凡例の表は見つかりませんでした</div>'}
         <ul class="krows" data-group="${g.id}"></ul>
       </div>`;
     wrap.append(el);
+    if (!g.box) continue;
     const pad = Math.min(g.rowH * 0.8, 9);
     const box = { x0: g.box.x0 - pad, x1: g.box.x1 + pad, y0: g.box.y0 - pad, y1: g.box.y1 + pad };
     const v = await renderView(g.page, Math.min(6, 900 / (box.x1 - box.x0)), box);
@@ -218,9 +251,9 @@ function renderRows() {
       return `<li class="krow ${hex ? '' : 'off'}">
         <div class="main">
           <button type="button" class="swatch ${hex ? '' : 'none'}" style="${hex ? `background:${hex}` : ''}" data-open="${k}" aria-expanded="${open}" aria-label="${esc(r.text || r.name)} の色を変える（今は${hex ? PALETTE.find((p) => p.id === id).name : '塗らない'}）"></button>
-          <span class="sym">${r.symbol ? symbolSvg(r.symbol) : esc(r.text)}</span>
+          <span class="sym${r.small ? ' sym-sm' : ''}">${r.symbol ? symbolSvg(r.symbol) : esc(r.text)}</span>
           <span class="nm"><b>${esc(r.name)}</b><span>${esc(r.sub)}${r.struck ? '　<span class="chip chip-gray">斜線＝使わない</span>' : ''}</span></span>
-          <span class="cnt">図面に<br><span class="num">${r.n}</span> か所</span>
+          <span class="cnt">${r.nLabel || '図面に'}<br><span class="num">${r.n}</span> か所</span>
         </div>${pal}</li>`;
     }).join('');
   }
@@ -257,13 +290,16 @@ async function showPlan() {
   for (const g of st.found?.marks || []) cnt[g.page] = (cnt[g.page] || 0) + 1;
   const wcnt = {};
   for (const m of st.walls?.marks || []) wcnt[m.page] = (wcnt[m.page] || 0) + 1;
-  const pagesWith = [...new Set([...Object.keys(cnt), ...Object.keys(wcnt)].map(Number))].sort((a, b) => a - b);
+  const kcnt = {};
+  for (const m of st.kiso?.marks || []) kcnt[m.page] = (kcnt[m.page] || 0) + 1;
+  if (st.kiso?.list) kcnt[st.kiso.list.page] = kcnt[st.kiso.list.page] || 0;
+  const pagesWith = [...new Set([...Object.keys(cnt), ...Object.keys(wcnt), ...Object.keys(kcnt)].map(Number))].sort((a, b) => a - b);
   const wrap = $('pages');
   wrap.innerHTML = pagesWith.length ? '' : '<p class="muted small">色をつける記号がありませんでした。</p>';
   for (const pi of pagesWith) {
     const box = document.createElement('div');
     box.className = 'pagebox';
-    const parts = [cnt[pi] && `金物 ${cnt[pi]} か所`, wcnt[pi] && `壁 ${wcnt[pi]} か所`].filter(Boolean).join('・');
+    const parts = [cnt[pi] && `金物 ${cnt[pi]} か所`, wcnt[pi] && `壁 ${wcnt[pi]} か所`, kcnt[pi] && `基礎 ${kcnt[pi]} か所`, st.kiso?.list?.page === pi && '基礎リスト'].filter(Boolean).join('・');
     box.innerHTML = `<p class="ph"><b>${pi + 1}ページ目</b>　${parts}</p><div class="pageview"><canvas aria-label="${pi + 1}ページ目の図面"></canvas></div>`;
     wrap.append(box);
     const v = await renderView(pi, PLAN_SCALE);
@@ -274,9 +310,9 @@ async function showPlan() {
 }
 
 function renderSummary() {
-  const { legend, found, walls } = st;
+  const { legend, found, walls, kiso } = st;
   const w = [];
-  let kanaPainted = 0, wallPainted = 0, issues = 0;
+  let kanaPainted = 0, wallPainted = 0, kisoPainted = 0, issues = 0;
   if (legend) {
     const cnt = countBySymbol(found.marks);
     kanaPainted = found.marks.filter((g) => colorHex(st.colors[g.s])).length;
@@ -300,9 +336,27 @@ function renderSummary() {
     if (unused.length) w.push(['', `壁の表にあって図面で見つからなかった記号：${unused.map((r) => r.label).join('／')}`]);
     w.push(['', '壁の記号は形で探しています。線が欠けていたり、ほかの線と重なったりしている記号は塗れないことがあるので、色のない記号が残っていないか図面で確かめてください。']);
   }
+  if (kiso) {
+    kisoPainted = kiso.marks.filter((m) => colorHex(st.colors[m.key])).length;
+    const rows = kisoAllRows();
+    const hdUsed = rows.filter((r) => r.kind === 'hd' && !r.struck);
+    for (const r of hdUsed) {
+      if (r.n) w.push(['', `ホールダウン ${r.text}：図面で ${r.n} か所（番号 1〜${r.n}）。凡例の行にも数を書きました。`]);
+      else { issues++; w.push(['bad', `凡例で使うことになっているホールダウン ${r.text} が、図面で見つかりません。凡例か図面を確かめてください。`]); }
+    }
+    const hdBad = rows.filter((r) => r.kind === 'hd' && r.struck && r.n);
+    issues += hdBad.length;
+    for (const r of hdBad) w.push(['bad', `凡例で斜線のホールダウン ${r.text} が、図面に ${r.n} か所あります。赤い輪のところを確かめてください。`]);
+    if (kiso.list) {
+      const unused = kiso.list.panels.filter((p) => p.unused).map((p) => p.code);
+      if (unused.length) w.push(['', `基礎リストで×の断面（使わない）：${[...new Set(unused)].join('・')}。塗っていません。`]);
+    }
+    if (!kiso.legend) w.push(['', '基礎伏図の「●凡例」の表が見つからなかったので、ホールダウンは表と照らし合わせていません。']);
+  }
   $('summary').innerHTML = `
     <div class="card stat accent"><span class="k">HARDWARE</span><span class="n">${legend ? kanaPainted : '-'}<span class="u">か所</span></span><span class="l">色をつけた金物の記号</span></div>
     <div class="card stat accent"><span class="k">WALL</span><span class="n">${walls ? wallPainted : '-'}<span class="u">か所</span></span><span class="l">色をつけた壁の記号</span></div>
+    <div class="card stat accent"><span class="k">FOUNDATION</span><span class="n">${kiso ? kisoPainted : '-'}<span class="u">か所</span></span><span class="l">色をつけた基礎の記号</span></div>
     <div class="card stat ${issues ? 'alert' : ''}"><span class="k">CHECK</span><span class="n">${issues}<span class="u">件</span></span><span class="l">確かめてほしいこと</span></div>`;
   $('warns').innerHTML = w.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join('');
 }

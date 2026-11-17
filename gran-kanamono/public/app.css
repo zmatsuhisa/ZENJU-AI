@@ -30,6 +30,7 @@
 .swatch.none { background: repeating-linear-gradient(135deg, #fff 0 5px, #e3e3e3 5px 7px); }
 .krow .sym { font-size: 20px; font-weight: 700; text-align: center; display: flex; justify-content: center; }
 .symsvg { width: 28px; height: 28px; color: var(--ink); }
+.krow .sym-sm { font-size: 11px; font-family: Poppins, "Zen Kaku Gothic New", sans-serif; letter-spacing: 0; white-space: nowrap; }
 .krow .nm { min-width: 0; }
 .krow .nm b { display: block; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .krow .nm > span { display: block; font-size: 11px; color: var(--muted); }
@@ -41,7 +42,7 @@
 .palette .none-btn { width: auto; padding: 0 12px; border-radius: var(--pill); background: #f4f4f4; font-size: 11px; font-weight: 700; color: var(--ink-2); }
 
 /* 3 図面全体 */
-#step-plan .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#step-plan .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .warns { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
 .warns li { font-size: 13px; padding: 9px 14px; border-radius: 12px; background: var(--amber-soft); color: var(--amber-ink); }
 .warns li.bad { background: var(--red-soft); color: var(--red); }
@@ -66,4 +67,5 @@
   .palette { padding: 2px 10px 12px 10px; }
   .drop { padding: 26px 12px; }
   .zoomed .pageview canvas { width: 420%; }
+  #step-plan .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

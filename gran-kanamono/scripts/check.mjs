@@ -9,6 +9,7 @@ import * as PDFLib from 'pdf-lib';
 import { analyze } from '../public/js/pdfread.js';
 import { countBySymbol, defaultColors, buildPaint, colorHex, WALL_ORDER } from '../public/js/core.js';
 import { countByKey, buildWallPaint } from '../public/js/walls.js';
+import { kisoRows, buildKisoPaint, kisoKey } from '../public/js/kiso.js';
 import { paintPdf } from '../public/js/paint.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,8 +20,8 @@ const doc = await pdfjs.getDocument({
   data: new Uint8Array(bytes), cMapUrl: join(root, 'node_modules/pdfjs-dist/cmaps/'), cMapPacked: true,
   standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/'), verbosity: 0,
 }).promise;
-const { legend, found, walls } = await analyze(pdfjs, doc);
-if (!legend && !walls) { console.log('金物リストも壁の表も見つかりません'); process.exit(2); }
+const { legend, found, walls, kiso } = await analyze(pdfjs, doc);
+if (!legend && !walls && !kiso) { console.log('金物リストも壁の表も見つかりません'); process.exit(2); }
 if (legend) {
   const cnt = countBySymbol(found.marks);
   console.log(`金物リスト: ${legend.page + 1}ページ「${legend.title}」 ${legend.rows.length}行`);
@@ -32,13 +33,24 @@ if (walls) {
   console.log(`壁の表: ${walls.legend.page + 1}ページ「${walls.legend.title}」 ${walls.legend.rows.length}行`);
   for (const r of walls.legend.rows) console.log(`  ${r.struck ? '[斜線]' : '      '} ${String(r.rate ?? '').padStart(5)}  図面に ${cnt.get(r.key) || 0}  ${r.label}`);
 }
+let kisoColors = {};
+if (kiso) {
+  const rows = kisoRows(kiso.legend, kiso.marks, kiso.list);
+  console.log(`基礎: 基礎伏図 ${kiso.planPages.map((p) => p + 1).join('・')}ページ / 凡例 ${kiso.legend ? kiso.legend.rows.length + '行' : 'なし'} / 基礎リスト ${kiso.list ? kiso.list.page + 1 + 'ページ' : 'なし'}`);
+  for (const r of rows) { console.log(`  ${r.struck ? '[斜線]' : '      '} ${r.text.padEnd(6)} 図面に ${String(r.n).padStart(2)}  ${r.name}`); kisoColors[r.key] = r.def; }
+  if (kiso.list) {
+    console.log(`  基礎リストの断面: ${kiso.list.panels.map((p) => p.code + (p.unused ? '×' : '')).join(' ')}`);
+    console.log(`  鉄筋の本数の文字: ${kiso.list.rebars.filter((r) => !r.panel?.unused).length}（×の断面を除く）`);
+    kisoColors[kisoKey('rebar', '')] = 'red';
+  }
+}
 const byPage = {};
 for (const g of found?.marks || []) byPage[g.page + 1] = (byPage[g.page + 1] || '') + 'k';
 for (const m of walls?.marks || []) byPage[m.page + 1] = (byPage[m.page + 1] || '') + 'w';
 console.log('ページごと（金物/壁）', Object.fromEntries(Object.entries(byPage).map(([p, s]) => [p, `${(s.match(/k/g) || []).length}/${(s.match(/w/g) || []).length}`])));
 if (out) {
   const colors = { ...(legend ? defaultColors(legend.rows) : {}), ...(walls ? defaultColors(walls.legend.rows, {}, WALL_ORDER) : {}) };
-  const paint = [...(legend ? buildPaint(legend, found.marks, colors) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : [])];
+  const paint = [...(legend ? buildPaint(legend, found.marks, colors) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : []), ...(kiso ? buildKisoPaint(kiso, kisoColors, colorHex) : [])];
   writeFileSync(out, await paintPdf(PDFLib, bytes, paint));
   console.log('書き出し:', out);
 }

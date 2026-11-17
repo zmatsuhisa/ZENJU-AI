@@ -38,7 +38,7 @@ export function toGlyph(item, page = 0) {
   const u = wEm / 2, v = 0.38;
   return {
     s: String(item.str).trim(), page, size,
-    x: e, y: f, w: item.width || 0,
+    x: e, y: f, w: item.width || 0, m: item.transform,
     cx: e + a * u + c * v, cy: f + b * u + d * v,
   };
 }
@@ -252,4 +252,4 @@ export function buildPaint(legend, marks, colors) {
 export const MARK_SCALE = 1.4;
 
 /** 塗りの強さ（画面と PDF で同じ見え方にする） */
-export const ALPHA = { band: 0.3, legend: 0.75, mark: 0.7, warn: 1 };
+export const ALPHA = { band: 0.3, legend: 0.75, mark: 0.7, warn: 1, ring: 1, label: 1 };

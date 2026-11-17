@@ -1,6 +1,7 @@
 // pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
 import { toGlyph, findLegend, findMarks } from './core.js';
 import { findWallLegend, findWallMarks, excludeZones } from './walls.js';
+import { mergeWords, findKisoLegend, findKisoMarks, findKisoList } from './kiso.js';
 
 /** ページごとの文字（toGlyph の形） */
 export async function readGlyphs(doc) {
@@ -71,7 +72,7 @@ export async function readSegments(pdfjs, page, box = null) {
 
 /**
  * PDF を読んで、金物リスト・金物記号・壁の表・壁の記号までまとめて返す。
- * @returns { pages, legend, found, walls: { legend, marks } | null }
+ * @returns { pages, legend, found, walls: { legend, marks } | null, kiso: { legend, marks, list, planPages } | null }
  */
 export async function analyze(pdfjs, doc, onProgress = () => {}) {
   const pages = await readGlyphs(doc);
@@ -92,8 +93,12 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
   for (let i = 0; i < pages.length && !wallLegend; i++) wallLegend = findWallLegend(pages[i].glyphs, segs[i], i);
   const found = legend ? findMarks(pages, legend) : null;
   // 壁の記号は伏図（平面）にしか出てこない。「伏図」とあるページだけで探す（詳細図の溶接の三角などを拾わないように）。
-  // どのページにも「伏図」がなければ全ページで探す
-  const planPages = pages.map((p) => p.glyphs.some((g) => /伏\s*図/.test(g.s)));
+  // どのページにも当てはまらなければ全ページで探す
+  // 基礎伏図には壁の記号も描かれているが、現場では塗らないので除く（柱伏図などで探す）
+  const planPages = pages.map((p) => {
+    const t = p.glyphs.map((g) => g.s.replace(/\s+/g, '')).join(' ');
+    return /伏図/.test(t) && !/基礎伏図/.test(t);
+  });
   const usePage = (i) => !planPages.some(Boolean) || planPages[i];
   const walls = wallLegend ? {
     legend: wallLegend,
@@ -101,5 +106,23 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
       exclude: excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes),
     }),
   } : null;
-  return { pages, legend, found, walls };
+  // 基礎図面：基礎伏図（「基礎伏図」とあるページ）の凡例と記号、基礎リスト（断面の一覧）
+  let kiso = null;
+  for (let i = 0; i < pages.length; i++) {
+    const words = mergeWords(pages[i].glyphs);
+    const isPlan = words.some((w) => /基礎伏図/.test(w.s.replace(/\s+/g, '')));
+    const list = findKisoList(words, segs[i], i);
+    if (!isPlan && !list) continue;
+    kiso ??= { legend: null, marks: [], list: null, planPages: [] };
+    if (isPlan) {
+      const lg = findKisoLegend(pages[i].glyphs, segs[i], i);
+      if (lg && !kiso.legend) kiso.legend = lg;
+      const ex = excludeZones([pages[i].glyphs], [], [sizes[i]])[0] || [];
+      kiso.marks.push(...findKisoMarks(words, lg, ex));
+      kiso.planPages.push(i);
+    }
+    if (list && !kiso.list) kiso.list = list;
+  }
+  if (kiso && !kiso.legend && !kiso.marks.length && !kiso.list) kiso = null;
+  return { pages, legend, found, walls, kiso };
 }
