@@ -136,3 +136,18 @@ test('外周の基礎：平行な2本の線の壁だけで建物の外まわり�
   assert.equal(ol.path.length, 6);
   assert.ok(Math.abs(Math.min(...ol.path.map((p) => p[0])) - 103) < 1.6);
 });
+
+test('外周の角を通り芯に合わせる（地縄寸法図と同じく芯で角を出す）。通り芯に乗らない小さな凸凹は消える', async () => {
+  const { snapToGrid, gridLines } = await import('../public/js/kiso.js');
+  // 通り芯：x=100・400、y=100・300（点線）
+  const dashes = [];
+  for (const x of [100, 400]) for (let y = 50; y < 350; y += 4) dashes.push([x, y, x, y + 2]);
+  for (const y of [100, 300]) for (let x = 50; x < 450; x += 4) dashes.push([x, y, x + 2, y]);
+  const grid = gridLines(dashes);
+  assert.deepEqual(grid.xs, [100, 400]);
+  assert.deepEqual(grid.ys, [100, 300]);
+  // 壁の外の縁（芯から 3pt 外）に、左の壁の外側へ 5pt の小さな凸凹がある（左回り）
+  const face = [[97, 97], [403, 97], [403, 303], [97, 303], [97, 220], [92, 220], [92, 200], [97, 200]];
+  const pts = snapToGrid(face, grid, 3, 8);
+  assert.deepEqual(pts.map((p) => p.join(',')).sort(), ['100,100', '100,300', '400,100', '400,300']);
+});

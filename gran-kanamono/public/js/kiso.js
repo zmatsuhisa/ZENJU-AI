@@ -364,17 +364,17 @@ export function wallLines(segs, box) {
  * @param pts 図面の記号の位置 [[x, y], ...]（建物の中にあるもの）
  * @returns { corners: [[x, y]...], path: [[x, y]...] } または null
  */
-export function findOuterBand(segs, pts, { cell = 0.75, thick = 6, margin = 70, open = 12 } = {}) {
+export function findOuterBand(segs, pts, { cell = 0.75, thick = 6, margin = 70, open = 16, grid = { xs: [], ys: [] }, gridTol = 8 } = {}) {
   if (pts.length < 3) return null;
   // 建物が探す範囲の端に触れていたら（記号が建物の片側に寄っているとき）、範囲を広げてやり直す
   for (let m = margin, k = 0; k < 4; k++, m *= 1.8) {
-    const r = outerBandOnce(segs, pts, cell, thick, m, open);
+    const r = outerBandOnce(segs, pts, cell, thick, m, open, grid, gridTol);
     if (r !== 'edge') return r;
   }
   return null;
 }
 
-function outerBandOnce(segs, pts, cell, thick, margin, open) {
+function outerBandOnce(segs, pts, cell, thick, margin, open, grid, gridTol) {
   const bx0 = Math.min(...pts.map((p) => p[0])) - margin, bx1 = Math.max(...pts.map((p) => p[0])) + margin;
   const by0 = Math.min(...pts.map((p) => p[1])) - margin, by1 = Math.max(...pts.map((p) => p[1])) + margin;
   const nx = Math.ceil((bx1 - bx0) / cell) + 1, ny = Math.ceil((by1 - by0) / cell) + 1;
@@ -434,11 +434,65 @@ function outerBandOnce(segs, pts, cell, thick, margin, open) {
   for (let i = 0; i < N; i++) if (comp[i] === best) mask[i] = 1;
   const r = Math.max(1, Math.round(open / 2 / cell));
   mask = growMask(shrinkMask(mask, nx, ny, r), nx, ny, r);
-  const face = traceOutline(mask, nx, ny);
-  const center = traceOutline(shrinkMask(mask, nx, ny, Math.max(1, Math.round(thick / 2 / cell))), nx, ny);
-  if (!face || !center) return null;
+  const face = traceOutline(mask, nx, ny, cell);
+  if (!face) return null;
   const toPt = ([x, y]) => [bx0 + x * cell, by0 + y * cell];
-  return { corners: face.map(toPt), path: center.map(toPt) };
+  // 地縄寸法図と同じく「芯」で角を出す：外の縁の各辺を、壁の厚みの半分だけ内側へずらし、近くの通り芯（tol 以内）に合わせる
+  const path = snapToGrid(face.map(toPt), grid, thick / 2, gridTol);
+  if (!path) return null;
+  return { corners: path, path };
+}
+
+/**
+ * 角だけの多角形（左回り）の各辺を、内側へ inset ずらし、近くの通り芯に合わせる。
+ * 合わせた結果、長さが 0 になった辺（通り芯に乗らない小さな凸凹）は消える。
+ */
+export function snapToGrid(poly, grid = { xs: [], ys: [] }, inset = 3, tol = 8) {
+  const n = poly.length;
+  if (n < 4) return null;
+  const near = (v, list) => { let b = null; for (const g of list) if (Math.abs(g - v) <= tol && (b === null || Math.abs(g - v) < Math.abs(b - v))) b = g; return b; };
+  // 辺ごとの位置（縦の辺は x、横の辺は y）
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    const vert = Math.abs(a[0] - b[0]) < 1e-6;
+    const dir = vert ? Math.sign(b[1] - a[1]) : Math.sign(b[0] - a[0]);
+    // 左回りなので、内側は進む向きの左
+    let v = vert ? a[0] - dir * inset : a[1] + dir * inset;
+    const g = near(v, vert ? grid.xs : grid.ys);
+    if (g !== null) v = g;
+    edges.push({ vert, v });
+  }
+  // 隣り合う辺の交点が角
+  let pts = [];
+  for (let i = 0; i < n; i++) {
+    const p = edges[(i - 1 + n) % n], q = edges[i];
+    if (p.vert === q.vert) continue;
+    pts.push(p.vert ? [p.v, q.v] : [q.v, p.v]);
+  }
+  // 重なった点・一直線上の点を除く（くり返す）
+  for (let changed = true; changed && pts.length > 4;) {
+    changed = false;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[(i - 1 + pts.length) % pts.length], b = pts[i], c = pts[(i + 1) % pts.length];
+      const dup = Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+      const col = (Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(b[0] - c[0]) < 1e-6) || (Math.abs(a[1] - b[1]) < 1e-6 && Math.abs(b[1] - c[1]) < 1e-6);
+      if (dup || col) { pts.splice(i, 1); changed = true; break; }
+    }
+  }
+  return pts.length >= 4 ? pts : null;
+}
+
+/** 点線の線分から通り芯の位置を求める（同じ縦・横の位置に点線が合計 len 以上並ぶもの） */
+export function gridLines(dashes, len = 150) {
+  const xs = new Map(), ys = new Map();
+  for (const s of dashes) {
+    const L = Math.hypot(s[2] - s[0], s[3] - s[1]);
+    if (Math.abs(s[0] - s[2]) < 0.05) { const k = Math.round(s[0] * 2) / 2; xs.set(k, (xs.get(k) || 0) + L); }
+    else if (Math.abs(s[1] - s[3]) < 0.05) { const k = Math.round(s[1] * 2) / 2; ys.set(k, (ys.get(k) || 0) + L); }
+  }
+  const pick = (m) => [...m.entries()].filter(([, v]) => v >= len).map(([k]) => k).sort((a, b) => a - b);
+  return { xs: pick(xs), ys: pick(ys) };
 }
 
 /** 8方向の距離で r ます内側まで削る（四角い角はそのまま残る） */
@@ -492,7 +546,7 @@ function growMask(m, nx, ny, r) {
  * ますのかたまりの外まわりの線を、角だけの多角形にする（ますの角の座標）。いちばん長い輪を外の縁とする。
  * 同じ向きに続く辺はまとめ、1ます分の小さな段差はならす。
  */
-function traceOutline(m, nx, ny) {
+function traceOutline(m, nx, ny, cellSize = 0.75) {
   const at = (x, y) => x >= 0 && y >= 0 && x < nx && y < ny && m[y * nx + x];
   const next = new Map(); // 辺の始点 → 終点（左回り）
   const key = (x, y) => x + ',' + y;
@@ -520,7 +574,8 @@ function traceOutline(m, nx, ny) {
     if (!best || loop.length > best.length) best = loop;
   }
   if (!best || best.length < 4) return null;
-  return cornersOf(best, 3);
+  // 角と見なす辺は 5pt 以上（図面の最短の辺は半間 455mm。1/70 でも約 6.5pt）
+  return cornersOf(best, Math.max(3, Math.round(5 / cellSize)));
 }
 
 /**
@@ -562,7 +617,13 @@ function cornersOf(loop, minLen) {
     runs.splice(k, 1);
     tidy();
   }
-  // 点の列に戻す（短い辺を除いた分の小さなずれは、最後の辺で始点に戻して吸収する）
+  // 短い辺を除いた分のずれを、同じ向きのいちばん長い辺で吸収する（斜めの辺を作らない）
+  for (const axis of [0, 1]) {
+    const res = runs.reduce((a, r) => a + r.d[axis] * r.len, 0);
+    if (!res) continue;
+    const cand = runs.filter((r) => r.d[axis] !== 0).sort((a, b) => b.len - a.len)[0];
+    if (cand) cand.len -= res * cand.d[axis];
+  }
   const pts = [];
   let x = loop[0][0], y = loop[0][1];
   for (const r of runs) { pts.push([x, y]); x += r.d[0] * r.len; y += r.d[1] * r.len; }
