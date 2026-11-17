@@ -1,7 +1,8 @@
 // pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
 import { toGlyph, findLegend, findMarks } from './core.js';
 import { findWallLegend, findWallMarks, excludeZones } from './walls.js';
-import { mergeWords, findKisoLegend, findKisoMarks, findKisoList } from './kiso.js';
+import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, findOuterBand } from './kiso.js';
+import { dropDashes } from './walls.js';
 
 /** ページごとの文字（toGlyph の形） */
 export async function readGlyphs(doc) {
@@ -118,8 +119,12 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
       const lg = findKisoLegend(pages[i].glyphs, segs[i], i);
       if (lg && !kiso.legend) kiso.legend = lg;
       const ex = excludeZones([pages[i].glyphs], [], [sizes[i]])[0] || [];
-      kiso.marks.push(...findKisoMarks(words, lg, ex));
+      const pm = findKisoMarks(words, lg, ex);
+      kiso.marks.push(...pm);
       kiso.planPages.push(i);
+      // 外周の基礎：図面の記号（人通口・梁符号など）を囲む建物の外まわりの壁に沿った帯
+      const rects = findOuterBand(dropDashes(segs[i]), pm.filter((m) => m.kind !== 'dok').map((m) => [m.cx, m.cy]));
+      if (rects.length) (kiso.outer ??= []).push({ page: i, rects });
     }
     if (list && !kiso.list) kiso.list = list;
   }

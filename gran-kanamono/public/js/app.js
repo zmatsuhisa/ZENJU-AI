@@ -125,7 +125,7 @@ function drawView(view, paint) {
   c.width = view.base.width; c.height = view.base.height;
   const ctx = c.getContext('2d');
   ctx.drawImage(view.base, 0, 0);
-  const order = { band: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
+  const order = { band: 0, outer: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
   for (const p of paint.filter((q) => q.page === view.pageIndex).sort((a, b) => order[a.kind] - order[b.kind])) {
     ctx.save();
     ctx.globalAlpha = ALPHA[p.kind];
@@ -134,7 +134,7 @@ function drawView(view, paint) {
       ctx.fillStyle = p.hex;
       ctx.font = `bold ${(p.size || 6) * view.scale}px Poppins, Arial, sans-serif`;
       ctx.fillText(p.text, x, y);
-    } else if (p.kind === 'band') {
+    } else if (p.kind === 'band' || p.kind === 'outer') {
       ctx.globalCompositeOperation = 'multiply';
       const [ax, ay] = view.at(p.x0, p.y0), [bx, by] = view.at(p.x1, p.y1);
       ctx.fillStyle = p.hex;
@@ -161,7 +161,7 @@ function currentPaint() {
 /** 基礎の行（凡例のホールダウン・人通口、図面にある開口補強・梁符号・スラブ・独立基礎、基礎リストの鉄筋の本数） */
 function kisoAllRows() {
   if (!st.kiso) return [];
-  const rows = kisoRows(st.kiso.legend, st.kiso.marks, st.kiso.list);
+  const rows = kisoRows(st.kiso.legend, st.kiso.marks, st.kiso.list, st.kiso.outer);
   if (st.kiso.list) {
     const n = st.kiso.list.rebars.filter((r) => !r.panel?.unused).length;
     rows.push({ key: kisoKey('rebar', ''), kind: 'rebar', text: '2-D13', name: '鉄筋の本数（基礎リスト）', struck: false, n, def: 'red', ring: true });
@@ -193,7 +193,7 @@ function groups() {
   }
   if (st.kiso) {
     const L = st.kiso.legend;
-    const subOf = { hd: 'ホールダウン（番号付き）', w: '人通口', kaiko: '開口補強', fg: '梁符号', slab: 'スラブ', dok: '独立基礎', rebar: '断面の鉄筋の本数に輪' };
+    const subOf = { outer: '外まわりの壁に沿って帯', hd: 'ホールダウン（番号付き）', w: '人通口', kaiko: '開口補強', fg: '梁符号', slab: 'スラブ', dok: '独立基礎', rebar: '断面の鉄筋の本数に輪' };
     out.push({
       id: 'kiso', head: '基礎（基礎伏図・基礎リスト）', page: L ? L.page : st.kiso.list.page, title: L ? L.title : '基礎リスト', box: L ? L.box : null, rowH: 20,
       rows: kisoAllRows().map((r) => ({ src: r, key: r.key, text: r.text, small: true, name: r.name, sub: subOf[r.kind] || '', struck: r.struck, n: r.n, nLabel: r.kind === 'rebar' ? '基礎リストに' : '図面に' })),

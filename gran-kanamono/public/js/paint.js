@@ -15,7 +15,7 @@ const rgbOf = (lib, hex) => {
 export async function paintPdf(lib, bytes, paint) {
   const doc = await lib.PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = doc.getPages();
-  const order = { band: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
+  const order = { band: 0, outer: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
   let font = null;
   for (const p of [...paint].sort((a, b) => order[a.kind] - order[b.kind])) {
     const page = pages[p.page];
@@ -27,8 +27,8 @@ export async function paintPdf(lib, bytes, paint) {
       page.drawText(p.text, { x: p.x, y: p.y, size: p.size || 6, font, color });
     } else if (p.kind === 'ring') {
       page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.rx ?? p.r, yScale: p.ry ?? p.r, borderColor: color, borderWidth: 0.8, borderOpacity: ALPHA.ring });
-    } else if (p.kind === 'band') {
-      page.drawRectangle({ x: p.x0, y: p.y0, width: p.x1 - p.x0, height: p.y1 - p.y0, color, opacity: ALPHA.band, blendMode: lib.BlendMode.Multiply });
+    } else if (p.kind === 'band' || p.kind === 'outer') {
+      page.drawRectangle({ x: p.x0, y: p.y0, width: p.x1 - p.x0, height: p.y1 - p.y0, color, opacity: ALPHA[p.kind], blendMode: lib.BlendMode.Multiply });
     } else if (p.kind === 'warn') {
       page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.rx ?? p.r, yScale: p.ry ?? p.r, borderColor: color, borderWidth: 0.9, borderOpacity: ALPHA.warn });
     } else {

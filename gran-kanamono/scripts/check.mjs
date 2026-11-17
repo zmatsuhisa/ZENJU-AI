@@ -35,7 +35,7 @@ if (walls) {
 }
 let kisoColors = {};
 if (kiso) {
-  const rows = kisoRows(kiso.legend, kiso.marks, kiso.list);
+  const rows = kisoRows(kiso.legend, kiso.marks, kiso.list, kiso.outer);
   console.log(`基礎: 基礎伏図 ${kiso.planPages.map((p) => p + 1).join('・')}ページ / 凡例 ${kiso.legend ? kiso.legend.rows.length + '行' : 'なし'} / 基礎リスト ${kiso.list ? kiso.list.page + 1 + 'ページ' : 'なし'}`);
   for (const r of rows) { console.log(`  ${r.struck ? '[斜線]' : '      '} ${r.text.padEnd(6)} 図面に ${String(r.n).padStart(2)}  ${r.name}`); kisoColors[r.key] = r.def; }
   if (kiso.list) {

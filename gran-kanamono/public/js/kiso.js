@@ -182,8 +182,9 @@ export function fgColor(code) {
  * 画面に出す行（色を決める単位）と、はじめの色。
  * 凡例のホールダウンの行（斜線は「使わない」）、人通口、開口補強、図面にある梁符号・スラブ・独立基礎。
  */
-export function kisoRows(legend, marks, list = null) {
+export function kisoRows(legend, marks, list = null, outer = null) {
   const rows = [];
+  if (outer?.length) rows.push({ key: kisoKey('outer', ''), kind: 'outer', text: '外周', name: '外周の基礎（外まわりの立上り）', struck: false, n: outer.length, def: 'sky' });
   const cnt = (key) => marks.filter((m) => m.key === key).length;
   const seen = new Set();
   for (const r of legend?.rows || []) {
@@ -261,8 +262,10 @@ export function findKisoList(words, segs, page = 0) {
  * 塗るもの（core.js の buildPaint と同じ形）。
  * ホールダウンには番号（左上から右下の順）を付け、凡例の行にも同じ色を付ける。
  */
-export function buildKisoPaint({ legend, marks, list }, colors, colorHex) {
+export function buildKisoPaint({ legend, marks, list, outer }, colors, colorHex) {
   const out = [];
+  const outerHex = colorHex(colors[kisoKey('outer', '')]);
+  if (outerHex) for (const o of outer || []) for (const r of o.rects) out.push({ kind: 'outer', page: o.page, hex: outerHex, ...r });
   const pad = 2.2;
   const rowsByKey = new Map();
   if (legend) {
@@ -314,4 +317,148 @@ export function buildKisoPaint({ legend, marks, list }, colors, colorHex) {
     }
   }
   return out;
+}
+
+/**
+ * 基礎の壁の線だけを残す。壁（立上り）は「平行な2本の線」で描かれるので、
+ * 縦か横の線のうち、2〜12pt 離れたところに重なる平行な線があるものを残す。柱の四角などの短い線（7pt 以下）も残す。
+ * 斜めの線（引き出し線・耐力壁の三角）や、1本だけの線（寸法線）は除く。
+ */
+export function wallLines(segs, box) {
+  const ax = segs.filter((s) => (Math.abs(s[1] - s[3]) < 0.05 || Math.abs(s[0] - s[2]) < 0.05) && len(s) > 0.3
+    && Math.max(s[0], s[2]) >= box.x0 && Math.min(s[0], s[2]) <= box.x1 && Math.max(s[1], s[3]) >= box.y0 && Math.min(s[1], s[3]) <= box.y1);
+  const H = [], V = [];
+  for (const s of ax) {
+    if (Math.abs(s[1] - s[3]) < 0.05) H.push({ s, c: s[1], a: Math.min(s[0], s[2]), b: Math.max(s[0], s[2]) });
+    else V.push({ s, c: s[0], a: Math.min(s[1], s[3]), b: Math.max(s[1], s[3]) });
+  }
+  const keep = [];
+  for (const list of [H, V]) {
+    list.sort((p, q) => p.c - q.c);
+    for (let i = 0; i < list.length; i++) {
+      const L = list[i];
+      if (L.b - L.a <= 7) { keep.push(L.s); continue; }
+      let ok = false;
+      // c（位置）で並べてあるので、2〜12pt 離れた範囲だけ見る
+      for (const dir of [-1, 1]) {
+        for (let j = i + dir; j >= 0 && j < list.length && Math.abs(list[j].c - L.c) <= 12 && !ok; j += dir) {
+          const M = list[j], d = Math.abs(M.c - L.c);
+          if (d < 2) continue;
+          if (Math.min(L.b, M.b) - Math.max(L.a, M.a) >= 3) ok = true;
+        }
+      }
+      if (ok) keep.push(L.s);
+    }
+  }
+  return keep;
+}
+
+/**
+ * 外周の基礎（外まわりの立上り）に沿った帯を求める。
+ * 1) 実線（点線は除いたもの）をます目に描き、1ます太らせて小さなすき間をふさぐ
+ * 2) 図面の記号（人通口・梁符号など）を囲む範囲を少し広げた枠から、線にぶつかるまで外側を塗りつぶす
+ * 3) 塗れなかった部分のうち、記号の多いかたまり＝建物。その外の縁から内側へ thick ポイントの範囲が帯
+ * @param segs 実線の線分（dropDashes 済み）
+ * @param pts 図面の記号の位置 [[x, y], ...]（建物の中にあるもの）
+ * @returns 帯の長方形 [{ x0, y0, x1, y1 }]（行ごとにまとめたもの）。見つからなければ []
+ */
+export function findOuterBand(segs, pts, { cell = 0.75, thick = 6, margin = 70 } = {}) {
+  if (pts.length < 3) return [];
+  // 建物が探す範囲の端に触れていたら（記号が建物の片側に寄っているとき）、範囲を広げてやり直す
+  for (let m = margin, k = 0; k < 4; k++, m *= 1.8) {
+    const r = outerBandOnce(segs, pts, cell, thick, m);
+    if (r !== 'edge') return r;
+  }
+  return [];
+}
+
+function outerBandOnce(segs, pts, cell, thick, margin) {
+  const bx0 = Math.min(...pts.map((p) => p[0])) - margin, bx1 = Math.max(...pts.map((p) => p[0])) + margin;
+  const by0 = Math.min(...pts.map((p) => p[1])) - margin, by1 = Math.max(...pts.map((p) => p[1])) + margin;
+  const nx = Math.ceil((bx1 - bx0) / cell) + 1, ny = Math.ceil((by1 - by0) / cell) + 1;
+  const N = nx * ny;
+  const line = new Uint8Array(N);
+  const ix = (x) => Math.floor((x - bx0) / cell), iy = (y) => Math.floor((y - by0) / cell);
+  for (const s of wallLines(segs, { x0: bx0, x1: bx1, y0: by0, y1: by1 })) {
+    if (Math.max(s[0], s[2]) < bx0 || Math.min(s[0], s[2]) > bx1 || Math.max(s[1], s[3]) < by0 || Math.min(s[1], s[3]) > by1) continue;
+    const n = Math.max(1, Math.ceil(Math.hypot(s[2] - s[0], s[3] - s[1]) / (cell * 0.5)));
+    for (let k = 0; k <= n; k++) {
+      const x = ix(s[0] + (s[2] - s[0]) * k / n), y = iy(s[1] + (s[3] - s[1]) * k / n);
+      if (x >= 0 && y >= 0 && x < nx && y < ny) line[y * nx + x] = 1;
+    }
+  }
+  const wall = line.slice();
+  for (let y = 1; y < ny - 1; y++) for (let x = 1; x < nx - 1; x++) {
+    if (!line[y * nx + x]) continue;
+    wall[y * nx + x - 1] = wall[y * nx + x + 1] = wall[(y - 1) * nx + x] = wall[(y + 1) * nx + x] = 1;
+  }
+  // 外側の塗りつぶし（枠のふちから）
+  const out = new Uint8Array(N);
+  const q = new Int32Array(N);
+  let qh = 0, qt = 0;
+  const push = (i) => { if (!out[i] && !wall[i]) { out[i] = 1; q[qt++] = i; } };
+  for (let x = 0; x < nx; x++) { push(x); push((ny - 1) * nx + x); }
+  for (let y = 0; y < ny; y++) { push(y * nx); push(y * nx + nx - 1); }
+  while (qh < qt) {
+    const i = q[qh++], x = i % nx, y = (i - x) / nx;
+    if (x > 0) push(i - 1); if (x < nx - 1) push(i + 1);
+    if (y > 0) push(i - nx); if (y < ny - 1) push(i + nx);
+  }
+  // 塗れなかったかたまりのうち、記号をいちばん多く含むもの＝建物
+  const comp = new Int32Array(N).fill(-1);
+  let best = -1, bestHits = 0, nc = 0;
+  for (const [px, py] of pts) {
+    const s0 = iy(py) * nx + ix(px);
+    if (s0 < 0 || s0 >= N || out[s0] || comp[s0] >= 0) continue;
+    const id = nc++;
+    qh = 0; qt = 0; comp[s0] = id; q[qt++] = s0;
+    while (qh < qt) {
+      const i = q[qh++], x = i % nx, y = (i - x) / nx;
+      for (const j of [x > 0 ? i - 1 : -1, x < nx - 1 ? i + 1 : -1, y > 0 ? i - nx : -1, y < ny - 1 ? i + nx : -1]) {
+        if (j >= 0 && !out[j] && comp[j] < 0) { comp[j] = id; q[qt++] = j; }
+      }
+    }
+    const hits = pts.filter(([a, b]) => comp[iy(b) * nx + ix(a)] === id).length;
+    if (hits > bestHits) { bestHits = hits; best = id; }
+  }
+  // 建物が見つからない＝範囲が建物の途中で切れて、外からの塗りつぶしが中に入った（範囲を広げてやり直す）
+  if (best < 0 || bestHits < pts.length * 0.5) return 'edge';
+  for (let x = 0; x < nx; x++) if (comp[x] === best || comp[(ny - 1) * nx + x] === best) return 'edge';
+  for (let y = 0; y < ny; y++) if (comp[y * nx] === best || comp[y * nx + nx - 1] === best) return 'edge';
+  // 建物の外の縁から内側へ thick の範囲
+  const depth = Math.max(1, Math.round(thick / cell));
+  const dist = new Int16Array(N).fill(-1);
+  qh = 0; qt = 0;
+  for (let i = 0; i < N; i++) {
+    if (comp[i] !== best) continue;
+    const x = i % nx, y = (i - x) / nx;
+    if ((x > 0 && out[i - 1]) || (x < nx - 1 && out[i + 1]) || (y > 0 && out[i - nx]) || (y < ny - 1 && out[i + nx])) { dist[i] = 0; q[qt++] = i; }
+  }
+  while (qh < qt) {
+    const i = q[qh++];
+    if (dist[i] >= depth - 1) continue;
+    const x = i % nx, y = (i - x) / nx;
+    for (const j of [x > 0 ? i - 1 : -1, x < nx - 1 ? i + 1 : -1, y > 0 ? i - nx : -1, y < ny - 1 ? i + nx : -1]) {
+      if (j >= 0 && comp[j] === best && dist[j] < 0) { dist[j] = dist[i] + 1; q[qt++] = j; }
+    }
+  }
+  // 行ごとのつながり（横の帯）を長方形にし、上下で同じものはまとめる
+  const rects = [];
+  let open = new Map();
+  for (let y = 0; y < ny; y++) {
+    const runs = [];
+    for (let x = 0; x < nx;) {
+      if (dist[y * nx + x] < 0) { x++; continue; }
+      const s = x; while (x < nx && dist[y * nx + x] >= 0) x++;
+      runs.push(`${s},${x}`);
+    }
+    const next = new Map();
+    for (const r of runs) {
+      const prev = open.get(r);
+      if (prev) { prev.y1 = y + 1; next.set(r, prev); open.delete(r); }
+      else { const [s, e] = r.split(',').map(Number); const rc = { x0: s, x1: e, y0: y, y1: y + 1 }; rects.push(rc); next.set(r, rc); }
+    }
+    open = next;
+  }
+  return rects.map((r) => ({ x0: bx0 + r.x0 * cell, x1: bx0 + r.x1 * cell, y0: by0 + r.y0 * cell, y1: by0 + r.y1 * cell }));
 }
