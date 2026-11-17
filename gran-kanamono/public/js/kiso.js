@@ -184,7 +184,7 @@ export function fgColor(code) {
  */
 export function kisoRows(legend, marks, list = null, outer = null) {
   const rows = [];
-  if (outer?.length) rows.push({ key: kisoKey('outer', ''), kind: 'outer', text: '外周', name: '外周の基礎（外まわりの立上り）', struck: false, n: outer.length, def: 'sky' });
+  if (outer?.length) rows.push({ key: kisoKey('outer', ''), kind: 'outer', text: '外周', name: `外周の基礎（外まわりの立上り・角 ${outer.reduce((a, o) => a + o.corners.length, 0)} か所）`, struck: false, n: outer.length, def: 'sky' });
   const cnt = (key) => marks.filter((m) => m.key === key).length;
   const seen = new Set();
   for (const r of legend?.rows || []) {
@@ -265,7 +265,8 @@ export function findKisoList(words, segs, page = 0) {
 export function buildKisoPaint({ legend, marks, list, outer }, colors, colorHex) {
   const out = [];
   const outerHex = colorHex(colors[kisoKey('outer', '')]);
-  if (outerHex) for (const o of outer || []) for (const r of o.rects) out.push({ kind: 'outer', page: o.page, hex: outerHex, ...r });
+  // 外周：外の縁から壁の厚みの半分だけ内側の線を、壁の厚みの太さで引く
+  if (outerHex) for (const o of outer || []) out.push({ kind: 'outline', page: o.page, hex: outerHex, points: o.path, width: o.thick || 6 });
   const pad = 2.2;
   const rowsByKey = new Map();
   if (legend) {
@@ -357,22 +358,23 @@ export function wallLines(segs, box) {
  * 外周の基礎（外まわりの立上り）に沿った帯を求める。
  * 1) 実線（点線は除いたもの）をます目に描き、1ます太らせて小さなすき間をふさぐ
  * 2) 図面の記号（人通口・梁符号など）を囲む範囲を少し広げた枠から、線にぶつかるまで外側を塗りつぶす
- * 3) 塗れなかった部分のうち、記号の多いかたまり＝建物。その外の縁から内側へ thick ポイントの範囲が帯
+ * 3) 塗れなかった部分のうち、記号の多いかたまり＝建物。細い出っ張り（幅 open ポイント未満）を削る
+ * 4) 地縄寸法図と同じく、外周を角だけの多角形にする（corners＝外の縁の角、path＝外の縁から thick/2 内側の線）
  * @param segs 実線の線分（dropDashes 済み）
  * @param pts 図面の記号の位置 [[x, y], ...]（建物の中にあるもの）
- * @returns 帯の長方形 [{ x0, y0, x1, y1 }]（行ごとにまとめたもの）。見つからなければ []
+ * @returns { corners: [[x, y]...], path: [[x, y]...] } または null
  */
-export function findOuterBand(segs, pts, { cell = 0.75, thick = 6, margin = 70 } = {}) {
-  if (pts.length < 3) return [];
+export function findOuterBand(segs, pts, { cell = 0.75, thick = 6, margin = 70, open = 12 } = {}) {
+  if (pts.length < 3) return null;
   // 建物が探す範囲の端に触れていたら（記号が建物の片側に寄っているとき）、範囲を広げてやり直す
   for (let m = margin, k = 0; k < 4; k++, m *= 1.8) {
-    const r = outerBandOnce(segs, pts, cell, thick, m);
+    const r = outerBandOnce(segs, pts, cell, thick, m, open);
     if (r !== 'edge') return r;
   }
-  return [];
+  return null;
 }
 
-function outerBandOnce(segs, pts, cell, thick, margin) {
+function outerBandOnce(segs, pts, cell, thick, margin, open) {
   const bx0 = Math.min(...pts.map((p) => p[0])) - margin, bx1 = Math.max(...pts.map((p) => p[0])) + margin;
   const by0 = Math.min(...pts.map((p) => p[1])) - margin, by1 = Math.max(...pts.map((p) => p[1])) + margin;
   const nx = Math.ceil((bx1 - bx0) / cell) + 1, ny = Math.ceil((by1 - by0) / cell) + 1;
@@ -425,40 +427,144 @@ function outerBandOnce(segs, pts, cell, thick, margin) {
   if (best < 0 || bestHits < pts.length * 0.5) return 'edge';
   for (let x = 0; x < nx; x++) if (comp[x] === best || comp[(ny - 1) * nx + x] === best) return 'edge';
   for (let y = 0; y < ny; y++) if (comp[y * nx] === best || comp[y * nx + nx - 1] === best) return 'edge';
-  // 建物の外の縁から内側へ thick の範囲
-  const depth = Math.max(1, Math.round(thick / cell));
-  const dist = new Int16Array(N).fill(-1);
-  qh = 0; qt = 0;
-  for (let i = 0; i < N; i++) {
-    if (comp[i] !== best) continue;
+  // 地縄寸法図と同じく、外周を「角と辺」の多角形で表す。
+  // 1) 建物のかたまりから、細い出っ張り（文字の枠・柱の小さな四角・壁の外の記号）を除く（幅 open ポイント未満を削る）
+  // 2) 外の縁の多角形（角）と、帯の中心線（外の縁から thick/2 内側）を求める
+  let mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (comp[i] === best) mask[i] = 1;
+  const r = Math.max(1, Math.round(open / 2 / cell));
+  mask = growMask(shrinkMask(mask, nx, ny, r), nx, ny, r);
+  const face = traceOutline(mask, nx, ny);
+  const center = traceOutline(shrinkMask(mask, nx, ny, Math.max(1, Math.round(thick / 2 / cell))), nx, ny);
+  if (!face || !center) return null;
+  const toPt = ([x, y]) => [bx0 + x * cell, by0 + y * cell];
+  return { corners: face.map(toPt), path: center.map(toPt) };
+}
+
+/** 8方向の距離で r ます内側まで削る（四角い角はそのまま残る） */
+function shrinkMask(m, nx, ny, r) {
+  const d = new Int16Array(nx * ny).fill(-1);
+  const q = new Int32Array(nx * ny);
+  let h = 0, t = 0;
+  for (let i = 0; i < m.length; i++) {
+    if (!m[i]) continue;
     const x = i % nx, y = (i - x) / nx;
-    if ((x > 0 && out[i - 1]) || (x < nx - 1 && out[i + 1]) || (y > 0 && out[i - nx]) || (y < ny - 1 && out[i + nx])) { dist[i] = 0; q[qt++] = i; }
+    if (x === 0 || y === 0 || x === nx - 1 || y === ny - 1) { d[i] = 1; q[t++] = i; continue; }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!m[i + dy * nx + dx]) { if (d[i] < 0) { d[i] = 1; q[t++] = i; } }
   }
-  while (qh < qt) {
-    const i = q[qh++];
-    if (dist[i] >= depth - 1) continue;
-    const x = i % nx, y = (i - x) / nx;
-    for (const j of [x > 0 ? i - 1 : -1, x < nx - 1 ? i + 1 : -1, y > 0 ? i - nx : -1, y < ny - 1 ? i + nx : -1]) {
-      if (j >= 0 && comp[j] === best && dist[j] < 0) { dist[j] = dist[i] + 1; q[qt++] = j; }
+  while (h < t) {
+    const i = q[h++], x = i % nx, y = (i - x) / nx;
+    if (d[i] > r) continue;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const a = x + dx, b = y + dy;
+      if (a < 0 || b < 0 || a >= nx || b >= ny) continue;
+      const j = b * nx + a;
+      if (m[j] && d[j] < 0) { d[j] = d[i] + 1; q[t++] = j; }
     }
   }
-  // 行ごとのつながり（横の帯）を長方形にし、上下で同じものはまとめる
-  const rects = [];
-  let open = new Map();
-  for (let y = 0; y < ny; y++) {
-    const runs = [];
-    for (let x = 0; x < nx;) {
-      if (dist[y * nx + x] < 0) { x++; continue; }
-      const s = x; while (x < nx && dist[y * nx + x] >= 0) x++;
-      runs.push(`${s},${x}`);
+  const o = new Uint8Array(m.length);
+  for (let i = 0; i < m.length; i++) if (m[i] && (d[i] < 0 || d[i] > r)) o[i] = 1;
+  return o;
+}
+
+/** 8方向の距離で r ます外へ広げる */
+function growMask(m, nx, ny, r) {
+  const d = new Int16Array(nx * ny).fill(-1);
+  const q = new Int32Array(nx * ny);
+  let h = 0, t = 0;
+  for (let i = 0; i < m.length; i++) if (m[i]) { d[i] = 0; q[t++] = i; }
+  while (h < t) {
+    const i = q[h++], x = i % nx, y = (i - x) / nx;
+    if (d[i] >= r) continue;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const a = x + dx, b = y + dy;
+      if (a < 0 || b < 0 || a >= nx || b >= ny) continue;
+      const j = b * nx + a;
+      if (d[j] < 0) { d[j] = d[i] + 1; q[t++] = j; }
     }
-    const next = new Map();
-    for (const r of runs) {
-      const prev = open.get(r);
-      if (prev) { prev.y1 = y + 1; next.set(r, prev); open.delete(r); }
-      else { const [s, e] = r.split(',').map(Number); const rc = { x0: s, x1: e, y0: y, y1: y + 1 }; rects.push(rc); next.set(r, rc); }
-    }
-    open = next;
   }
-  return rects.map((r) => ({ x0: bx0 + r.x0 * cell, x1: bx0 + r.x1 * cell, y0: by0 + r.y0 * cell, y1: by0 + r.y1 * cell }));
+  const o = new Uint8Array(m.length);
+  for (let i = 0; i < m.length; i++) if (d[i] >= 0) o[i] = 1;
+  return o;
+}
+
+/**
+ * ますのかたまりの外まわりの線を、角だけの多角形にする（ますの角の座標）。いちばん長い輪を外の縁とする。
+ * 同じ向きに続く辺はまとめ、1ます分の小さな段差はならす。
+ */
+function traceOutline(m, nx, ny) {
+  const at = (x, y) => x >= 0 && y >= 0 && x < nx && y < ny && m[y * nx + x];
+  const next = new Map(); // 辺の始点 → 終点（左回り）
+  const key = (x, y) => x + ',' + y;
+  for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+    if (!at(x, y)) continue;
+    if (!at(x, y - 1)) next.set(key(x, y), [x + 1, y]);       // 下の辺
+    if (!at(x + 1, y)) next.set(key(x + 1, y), [x + 1, y + 1]); // 右の辺
+    if (!at(x, y + 1)) next.set(key(x + 1, y + 1), [x, y + 1]); // 上の辺
+    if (!at(x - 1, y)) next.set(key(x, y + 1), [x, y]);       // 左の辺
+  }
+  const seen = new Set();
+  let best = null;
+  for (const k0 of next.keys()) {
+    if (seen.has(k0)) continue;
+    const loop = [];
+    let k = k0, guard = 0;
+    while (!seen.has(k) && guard++ < 2e6) {
+      seen.add(k);
+      const [x, y] = k.split(',').map(Number);
+      loop.push([x, y]);
+      const n = next.get(k);
+      if (!n) break;
+      k = key(n[0], n[1]);
+    }
+    if (!best || loop.length > best.length) best = loop;
+  }
+  if (!best || best.length < 4) return null;
+  return cornersOf(best, 3);
+}
+
+/**
+ * ますの縁をたどった点の列から、角だけの多角形を作る（地縄寸法図の「角」と同じ考え方）。
+ * 同じ向きに続く辺を1本にまとめ、minLen ます未満の短い辺（角の欠け・段差）はならす。
+ */
+function cornersOf(loop, minLen) {
+  const n = loop.length;
+  let runs = [];
+  for (let i = 0; i < n; i++) {
+    const a = loop[i], b = loop[(i + 1) % n];
+    const d = [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])];
+    const L = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+    const last = runs[runs.length - 1];
+    if (last && last.d[0] === d[0] && last.d[1] === d[1]) last.len += L; else runs.push({ d, len: L });
+  }
+  const same = (p, q) => p.d[0] === q.d[0] && p.d[1] === q.d[1];
+  const opp = (p, q) => p.d[0] === -q.d[0] && p.d[1] === -q.d[1];
+  const tidy = () => {
+    for (let changed = true; changed && runs.length > 4;) {
+      changed = false;
+      for (let i = 0; i < runs.length; i++) {
+        const j = (i + 1) % runs.length, p = runs[i], q = runs[j];
+        if (i === j) break;
+        if (same(p, q)) { p.len += q.len; runs.splice(j, 1); changed = true; break; }
+        if (opp(p, q)) {
+          const dl = p.len - q.len;
+          if (dl >= 0) { p.len = dl; runs.splice(j, 1); } else { q.len = -dl; runs.splice(i, 1); }
+          runs = runs.filter((r) => r.len > 0); changed = true; break;
+        }
+      }
+    }
+  };
+  tidy();
+  for (let guard = 0; guard < 10000 && runs.length > 4; guard++) {
+    let k = -1;
+    for (let i = 0; i < runs.length; i++) if (runs[i].len < minLen && (k < 0 || runs[i].len < runs[k].len)) k = i;
+    if (k < 0) break;
+    runs.splice(k, 1);
+    tidy();
+  }
+  // 点の列に戻す（短い辺を除いた分の小さなずれは、最後の辺で始点に戻して吸収する）
+  const pts = [];
+  let x = loop[0][0], y = loop[0][1];
+  for (const r of runs) { pts.push([x, y]); x += r.d[0] * r.len; y += r.d[1] * r.len; }
+  return pts.length >= 4 ? pts : null;
 }

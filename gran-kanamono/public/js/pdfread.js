@@ -123,8 +123,8 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
       kiso.marks.push(...pm);
       kiso.planPages.push(i);
       // 外周の基礎：図面の記号（人通口・梁符号など）を囲む建物の外まわりの壁に沿った帯
-      const rects = findOuterBand(dropDashes(segs[i]), pm.filter((m) => m.kind !== 'dok').map((m) => [m.cx, m.cy]));
-      if (rects.length) (kiso.outer ??= []).push({ page: i, rects });
+      const ol = findOuterBand(dropDashes(segs[i]), pm.filter((m) => m.kind !== 'dok').map((m) => [m.cx, m.cy]));
+      if (ol) (kiso.outer ??= []).push({ page: i, thick: 6, ...ol });
     }
     if (list && !kiso.list) kiso.list = list;
   }

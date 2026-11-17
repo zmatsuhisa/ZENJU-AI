@@ -125,11 +125,18 @@ function drawView(view, paint) {
   c.width = view.base.width; c.height = view.base.height;
   const ctx = c.getContext('2d');
   ctx.drawImage(view.base, 0, 0);
-  const order = { band: 0, outer: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
+  const order = { band: 0, outer: 0, outline: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
   for (const p of paint.filter((q) => q.page === view.pageIndex).sort((a, b) => order[a.kind] - order[b.kind])) {
     ctx.save();
     ctx.globalAlpha = ALPHA[p.kind];
-    if (p.kind === 'label') {
+    if (p.kind === 'outline') {
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.beginPath();
+      p.points.forEach(([x, y], k) => { const [a, b] = view.at(x, y); if (k) ctx.lineTo(a, b); else ctx.moveTo(a, b); });
+      ctx.closePath();
+      ctx.strokeStyle = p.hex; ctx.lineWidth = p.width * view.scale; ctx.lineJoin = 'miter';
+      ctx.stroke();
+    } else if (p.kind === 'label') {
       const [x, y] = view.at(p.x, p.y);
       ctx.fillStyle = p.hex;
       ctx.font = `bold ${(p.size || 6) * view.scale}px Poppins, Arial, sans-serif`;

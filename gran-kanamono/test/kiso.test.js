@@ -123,12 +123,16 @@ test('外周の基礎：平行な2本の線の壁だけで建物の外まわり�
   const kept = wallLines(segs, { x0: 0, x1: 500, y0: 0, y1: 500 });
   assert.ok(!kept.some((s) => s[0] === 420), '寸法線は壁ではない');
   const pts = [[150, 150], [300, 200], [180, 300], [200, 120]];
-  const rects = findOuterBand(segs, pts, { thick: 6 });
-  assert.ok(rects.length > 0);
-  const area = rects.reduce((a, r) => a + (r.x1 - r.x0) * (r.y1 - r.y0), 0);
-  const perim = 2 * (300 + 250); // L 字の外周の長さ
-  assert.ok(area > perim * 4 && area < perim * 8, `帯の面積 ${area.toFixed(0)}`);
-  assert.ok(rects.every((r) => r.x1 <= 401.5 && r.x0 >= 98.5), '帯は建物の外に出ない（寸法線・三角まで広がらない）');
-  // 建物の真ん中（帯から離れた所）は塗らない
-  assert.ok(!rects.some((r) => r.x0 <= 175 && r.x1 >= 175 && r.y0 <= 175 && r.y1 >= 175));
+  // 壁の外にくっついた小さな四角（文字の枠など。幅 7pt）は外周の角に入れない
+  segs.push([250, 350, 250, 357], [250, 357, 265, 357], [265, 357, 265, 350]);
+  const ol = findOuterBand(segs, pts, { thick: 6 });
+  assert.ok(ol);
+  // L 字の外周は角 6 つ（地縄寸法図と同じく角だけの多角形）
+  assert.equal(ol.corners.length, 6);
+  const xs = ol.corners.map((p) => p[0]), ys = ol.corners.map((p) => p[1]);
+  assert.ok(Math.min(...xs) > 98 && Math.max(...xs) < 402, `角の x ${Math.min(...xs)}〜${Math.max(...xs)}`);
+  assert.ok(Math.min(...ys) > 98 && Math.max(...ys) < 352, `角の y ${Math.min(...ys)}〜${Math.max(...ys)}`);
+  // 帯の中心線は外の縁から 3pt 内側
+  assert.equal(ol.path.length, 6);
+  assert.ok(Math.abs(Math.min(...ol.path.map((p) => p[0])) - 103) < 1.6);
 });
