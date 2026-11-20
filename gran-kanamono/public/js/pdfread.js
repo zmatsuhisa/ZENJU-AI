@@ -1,6 +1,6 @@
 // pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
-import { toGlyph, findLegend, findMarks } from './core.js';
-import { findWallLegend, findWallMarks, excludeZones } from './walls.js';
+import { toGlyph, findLegend, findMarks, uprightMatrix, mulMatrix, tableCopies } from './core.js';
+import { findWallLegend, findWallMarks, excludeZones, findCodeWallMarks } from './walls.js';
 import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, findOuterBand, gridLines, wallsOnGrid, findSpans, gridMm, mmPerPt } from './kiso.js';
 import { dropDashes } from './walls.js';
 import { floorPages, gridLabels, fitAxis, upperWalls } from './upper.js';
@@ -11,10 +11,19 @@ export async function readGlyphs(doc) {
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
     const tc = await page.getTextContent();
+    // 横向きに置いて回して見せているページも、正しい向きの座標で読む
+    const M = uprightMatrix(page.rotate, page.view);
     const glyphs = [];
+    const seen = new Map();
     for (const it of tc.items) {
       if (!it.str || !it.str.trim()) continue;
-      glyphs.push(toGlyph(it, n - 1));
+      // 太字に見せるため同じ字を少しずつずらして何回も書いた図面がある。同じ字・ほぼ同じ位置は1つにする
+      const g = toGlyph({ ...it, transform: mulMatrix(M, it.transform) }, n - 1);
+      const k = `${g.s}|${Math.round(g.cx / 3)}|${Math.round(g.cy / 3)}`;
+      const near = [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => `${g.s}|${Math.round(g.cx / 3) + dx}|${Math.round(g.cy / 3) + dy}`));
+      if (near.some((q) => (seen.get(q) || []).some((o) => Math.hypot(o.cx - g.cx, o.cy - g.cy) < 1.5))) continue;
+      (seen.get(k) || seen.set(k, []).get(k)).push(g);
+      glyphs.push(g);
     }
     pages.push({ glyphs });
   }
@@ -29,7 +38,9 @@ export async function readSegments(pdfjs, page, box = null) {
   const { OPS } = pdfjs;
   const ol = await page.getOperatorList();
   const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
-  let m = [1, 0, 0, 1, 0, 0];
+  // 正しい向きの座標で返す（横向きに置いて回して見せているページ）
+  const M0 = uprightMatrix(page.rotate, page.view);
+  let m = M0;
   const stack = [];
   const ap = (x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
   const segs = [];
@@ -37,10 +48,10 @@ export async function readSegments(pdfjs, page, box = null) {
   for (let i = 0; i < ol.fnArray.length; i++) {
     const fn = ol.fnArray[i], args = ol.argsArray[i];
     if (fn === OPS.save) stack.push(m);
-    else if (fn === OPS.restore) m = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.restore) m = stack.pop() || M0;
     else if (fn === OPS.transform) m = mul(m, args);
     else if (fn === OPS.paintFormXObjectBegin) { stack.push(m); if (Array.isArray(args?.[0]) && args[0].length === 6) m = mul(m, args[0]); }
-    else if (fn === OPS.paintFormXObjectEnd) m = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.paintFormXObjectEnd) m = stack.pop() || M0;
     else if (fn === OPS.constructPath) {
       const [ops, nums] = args;
       let k = 0, cur = null, start = null;
@@ -84,7 +95,8 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
     onProgress(n, doc.numPages);
     const page = await doc.getPage(n);
     const [x0, y0, x1, y1] = page.view;
-    sizes.push({ w: x1 - x0, h: y1 - y0 });
+    const side = page.rotate % 180 !== 0;
+    sizes.push({ w: side ? y1 - y0 : x1 - x0, h: side ? x1 - x0 : y1 - y0 });
     segs.push(await readSegments(pdfjs, page));
   }
   let legend = null;
@@ -93,7 +105,10 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
   }
   let wallLegend = null;
   for (let i = 0; i < pages.length && !wallLegend; i++) wallLegend = findWallLegend(pages[i].glyphs, segs[i], i);
-  const found = legend ? findMarks(pages, legend) : null;
+  // ほかのページに同じ表が書いてあれば（2階の柱伏図にも金物リスト・壁の表がある）、その中は探さない
+  const copies = {};
+  for (const t of [legend, wallLegend]) for (const [k, v] of Object.entries(tableCopies(pages, t))) (copies[k] ??= []).push(...v);
+  const found = legend ? findMarks(pages, legend, { exclude: copies }) : null;
   // 壁の記号は伏図（平面）にしか出てこない。「伏図」とあるページだけで探す（詳細図の溶接の三角などを拾わないように）。
   // どのページにも当てはまらなければ全ページで探す
   // 基礎伏図には壁の記号も描かれているが、現場では塗らないので除く（柱伏図などで探す）
@@ -102,11 +117,14 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
     return /伏図/.test(t) && !/基礎伏図/.test(t);
   });
   const usePage = (i) => !planPages.some(Boolean) || planPages[i];
+  const exclude = wallLegend ? excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes) : {};
+  for (const [k, v] of Object.entries(copies)) (exclude[k] ??= []).push(...v);
   const walls = wallLegend ? {
     legend: wallLegend,
-    marks: findWallMarks(segs.map((s, i) => ({ segs: usePage(i) ? s : [] })), wallLegend, {
-      exclude: excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes),
-    }),
+    marks: wallLegend.rows.some((r) => r.code)
+      // 番号で書く壁（6-1・12-1 など）：図面の字で探す
+      ? findCodeWallMarks(pages.map((p, i) => ({ glyphs: usePage(i) ? p.glyphs : [] })), wallLegend, { exclude })
+      : findWallMarks(segs.map((s, i) => ({ segs: usePage(i) ? s : [] })), wallLegend, { exclude }),
   } : null;
   // 基礎図面：基礎伏図（「基礎伏図」とあるページ）の凡例と記号、基礎リスト（断面の一覧）
   let kiso = null;
@@ -145,13 +163,15 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
   if (kiso && !kiso.legend && !kiso.marks.length && !kiso.list) kiso = null;
   // 1階の伏図（「1階」と「伏図」が両方あるページ。基礎伏図は除く）：オメガの足元を桃にする
   const firstFloor = [];
-  pages.forEach((p, i) => {
+  const fl0 = floorPages(pages);
+  if (fl0.first != null) firstFloor.push(fl0.first);
+  else pages.forEach((p, i) => {
     const t = p.glyphs.map((g) => g.s).join('').normalize('NFKC').replace(/\s+/g, '');
     if (/1階.*伏図/.test(t) && !/基礎伏図/.test(t)) firstFloor.push(i);
   });
   // 2階建て：2階の柱伏図の耐力壁（壁の記号）を、通り芯の名前で 1階の柱伏図に落とし込む
   let upper = null;
-  const fl = floorPages(pages);
+  const fl = fl0;
   if (walls && fl.first != null && fl.second != null && fl.first !== fl.second) {
     const gridOf = (i) => { const solid = new Set(dropDashes(segs[i])); return gridLines(segs[i].filter((x) => !solid.has(x))); };
     const g1 = gridOf(fl.first), g2 = gridOf(fl.second);

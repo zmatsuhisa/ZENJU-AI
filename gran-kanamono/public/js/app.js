@@ -107,9 +107,11 @@ async function renderView(pageIndex, scale, box = null) {
   const page = await st.doc.getPage(pageIndex + 1);
   const vp = page.getViewport({ scale });
   let ox = 0, oy = 0, w = vp.width, h = vp.height;
+  // 色の座標は「正しい向き」（左下が原点・y が上向き）。画面の向きの座標は上下を反転するだけ
+  const toView = (x, y) => [x * scale, vp.height - y * scale];
   if (box) {
-    const [ax, ay] = vp.convertToViewportPoint(box.x0, box.y0);
-    const [bx, by] = vp.convertToViewportPoint(box.x1, box.y1);
+    const [ax, ay] = toView(box.x0, box.y0);
+    const [bx, by] = toView(box.x1, box.y1);
     ox = Math.floor(Math.min(ax, bx)); oy = Math.floor(Math.min(ay, by));
     w = Math.ceil(Math.abs(bx - ax)); h = Math.ceil(Math.abs(by - ay));
   }
@@ -118,7 +120,7 @@ async function renderView(pageIndex, scale, box = null) {
   const ctx = base.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
   await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -ox, -oy] }).promise;
-  const at = (x, y) => { const [px, py] = vp.convertToViewportPoint(x, y); return [px - ox, py - oy]; };
+  const at = (x, y) => { const [px, py] = toView(x, y); return [px - ox, py - oy]; };
   return { pageIndex, base, at, scale, canvas: null };
 }
 

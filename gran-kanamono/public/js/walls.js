@@ -1,3 +1,4 @@
+import { mergeWords } from './kiso.js';
 // 壁（筋かい・面材）の記号を見つける処理。記号は文字ではなく線で描かれているので、形を比べて探す。
 // 画面・pdf.js に依存しない純粋な関数だけ。座標は PDF の座標（左下が原点・ポイント）。
 // 線分は [x0, y0, x1, y1]。
@@ -21,6 +22,41 @@ const segIn = (s, b) => Math.min(s[0], s[2]) >= b.x0 && Math.max(s[0], s[2]) <= 
  * 行は表の横線で分け、各行の左端の図形をその行の記号とする。斜線の行は「使わない」。
  * @returns { title, page, rows: [{ key, label, rate, cy, y0, y1, symbol: {segs, box}, struck }], box, rowH } または null
  */
+const CODE_RE = /^\d{1,2}-\d{1,2}$/;
+const codeOf = (str) => str.normalize('NFKC').replace(/[\s　]+/g, '').replace(/[‐－−ー―]/g, '-');
+
+/** 字の四角（横書き・縦書きどちらも） */
+export function glyphBox(g) {
+  const [a, b] = g.m || [1, 0];
+  const vertical = Math.abs(b) > Math.abs(a);
+  const hw = (vertical ? g.size * 0.5 : g.w / 2), hh = (vertical ? g.w / 2 : g.size * 0.5);
+  return { x0: g.cx - hw, x1: g.cx + hw, y0: g.cy - hh, y1: g.cy + hh };
+}
+
+/**
+ * 番号で書く壁（6-1・12-1 など）を図面の字から探す。
+ * @param pages [{ glyphs }]（探さないページは glyphs を空にして渡す） @param exclude ページごとの除く範囲（表など）
+ */
+export function findCodeWallMarks(pages, wallLegend, { exclude = {} } = {}) {
+  const byCode = new Map(wallLegend.rows.filter((r) => r.code).map((r) => [r.code, r]));
+  const marks = [];
+  pages.forEach((p, i) => {
+    const zones = exclude[i] || [];
+    // 縦書きの番号は1字ずつ書かれている（「1」「2」「-」「1」）。縦書きの字だけつないで読む
+    const vert = p.glyphs.filter((g) => g.m && Math.abs(g.m[1]) > Math.abs(g.m[0]));
+    const words = [...p.glyphs.filter((g) => !vert.includes(g)), ...mergeWords(vert)];
+    for (const g of words) {
+      const r = byCode.get(codeOf(g.s));
+      if (!r) continue;
+      if (i === wallLegend.page && g.cx >= wallLegend.box.x0 && g.cx <= wallLegend.box.x1 && g.cy >= wallLegend.box.y0 && g.cy <= wallLegend.box.y1) continue;
+      if (zones.some((z) => g.cx >= z.x0 && g.cx <= z.x1 && g.cy >= z.y0 && g.cy <= z.y1)) continue;
+      const box = g.box || glyphBox(g);
+      marks.push({ key: r.key, page: i, cx: g.cx, cy: g.cy, box, code: r.code });
+    }
+  });
+  return marks;
+}
+
 export function findWallLegend(glyphs, segs, page = 0) {
   const titles = glyphs.filter((g) => WALL_TITLE_RE.test(g.s));
   for (const title of titles) {
@@ -49,7 +85,7 @@ function readWallTable(title, glyphs, segs, page) {
   for (let i = 1; i < lines.length; i++) if (lines[i - 1] - lines[i] > 6) bands.push({ y1: lines[i - 1], y0: lines[i] });
   if (bands.length < 2) return null;
   // いちばん上の帯は見出し（「記号」の字がある）
-  const isHead = (b) => glyphs.some((g) => g.s === '記号' && g.cy < b.y1 && g.cy > b.y0 && g.cx > tx0 && g.cx < tx1);
+  const isHead = (b) => glyphs.some((g) => (g.s === '記号' || g.s === '番号') && g.cy < b.y1 && g.cy > b.y0 && g.cx > tx0 && g.cx < tx1);
   const body = bands.filter((b) => !isHead(b));
   if (!body.length) return null;
   // 「壁倍率」の見出し（その真下の数字だけを壁倍率として読む）
@@ -67,6 +103,19 @@ function readWallTable(title, glyphs, segs, page) {
     const struck = segs.some((s) => len(s) > width * 0.3 && Math.abs(s[3] - s[1]) > 1 && Math.abs(s[3] - s[1]) < h * 1.6
       && Math.min(s[1], s[3]) < (b.y0 + b.y1) / 2 && Math.max(s[1], s[3]) > (b.y0 + b.y1) / 2 && Math.min(s[0], s[2]) < tx0 + width * 0.3);
     const sym = inCell.filter((s) => !(Math.abs(s[0] - s[2]) < 0.3 && Math.abs(s[3] - s[1]) > h * 0.8));
+    // 記号の代わりに番号（6-1・12-1 など）で書く表：図面にも同じ番号の字が書いてある
+    const codeG = texts.length && CODE_RE.test(codeOf(texts[0].s)) ? texts[0] : null;
+    if (codeG) {
+      const rest = texts.filter((g) => g !== codeG);
+      const alone2 = (g) => !rest.some((o) => o !== g && Math.abs(o.cy - g.cy) < g.size * 0.6
+        && (Math.abs(o.x + o.w - g.x) < g.size * 0.5 || Math.abs(g.x + g.w - o.x) < g.size * 0.5));
+      const nums2 = rest.filter((g) => NUM_RE.test(g.s) && alone2(g));
+      const rG = rateHead ? nums2.find((g) => Math.abs(g.cx - rateHead.cx) < Math.max(rateHead.w, 12)) || null : nums2[nums2.length - 1] || null;
+      const label = readCells(rest.filter((g) => g !== rG && g.s !== '-'));
+      const code = codeOf(codeG.s);
+      rows.push({ key: 'w:' + label, label, code, rate: rG ? Number(rG.s) : null, cy: (b.y0 + b.y1) / 2, y0: b.y0, y1: b.y1, symbol: { code, segs: [], box: glyphBox(codeG) }, struck });
+      continue;
+    }
     if (!sym.length) continue;
     // 数字だけで、左右に字がくっついていないもの（「接合金物5 倍」の 5 は壁倍率ではない）
     const alone = (g) => !texts.some((o) => o !== g && Math.abs(o.cy - g.cy) < g.size * 0.6

@@ -26,12 +26,23 @@ export function floorPages(pages) {
 export function gridLabels(glyphs, grid, tol = 1.5) {
   const out = { x: new Map(), y: new Map() };
   const words = glyphs.filter((g) => LABEL_RE.test(g.s.normalize('NFKC').trim()));
-  for (const [axis, coords] of [['x', grid.xs], ['y', grid.ys]]) {
+  // 通り芯の名前は図面の外側に一列に並ぶ（い・ろ・は…が同じ高さ、1・2・3…が同じ横位置）。
+  // 柱のそばの金物の記号（同じ字がくり返す）と分けるため、5 字以上ほとんど別の字が並ぶ列だけを使う
+  const lineUp = (key) => {
+    const keep = new Set();
+    for (const g of words) {
+      const row = words.filter((o) => Math.abs(key(o) - key(g)) < 1.5);
+      const names = new Set(row.map((o) => o.s.normalize('NFKC').trim()));
+      if (row.length >= 5 && names.size >= row.length * 0.6) for (const o of row) keep.add(o);
+    }
+    return [...keep];
+  };
+  const xWords = lineUp((g) => g.cy), yWords = lineUp((g) => g.cx);
+  for (const [axis, coords, ws] of [['x', grid.xs, xWords], ['y', grid.ys, yWords]]) {
     for (const c of coords) {
-      const near = words.filter((g) => Math.abs((axis === 'x' ? g.cx : g.cy) - c) <= tol);
-      // 同じ名前が線の両端（上と下、左と右）にあることが多い。いちばん多い名前をとる
+      const near = ws.filter((g) => Math.abs((axis === 'x' ? g.cx : g.cy) - c) <= tol);
       const cnt = new Map();
-      for (const g of near) { const s = g.s.normalize('NFKC').trim(); cnt.set(s, (cnt.get(s) || 0) + 1); }
+      for (const g of near) { const t = g.s.normalize('NFKC').trim(); cnt.set(t, (cnt.get(t) || 0) + 1); }
       const best = [...cnt].sort((p, q) => q[1] - p[1])[0];
       if (best && !out[axis].has(best[0])) out[axis].set(best[0], c);
     }
@@ -43,14 +54,23 @@ export function gridLabels(glyphs, grid, tol = 1.5) {
 export function fitAxis(from, to) {
   const pairs = [...from].filter(([k]) => to.has(k)).map(([k, v]) => [v, to.get(k)]);
   if (pairs.length < 2) return null;
-  const n = pairs.length, sx = pairs.reduce((s, p) => s + p[0], 0), sy = pairs.reduce((s, p) => s + p[1], 0);
-  const sxx = pairs.reduce((s, p) => s + p[0] * p[0], 0), sxy = pairs.reduce((s, p) => s + p[0] * p[1], 0);
+  // 読み違えた名前が少し混ざってもよいように、いちばん多くの組が乗る式を探してから、その組だけで求め直す
+  let best = null;
+  for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++) {
+    const [[u1, v1], [u2, v2]] = [pairs[i], pairs[j]];
+    if (Math.abs(u2 - u1) < 20) continue;
+    const a = (v2 - v1) / (u2 - u1), b = v1 - a * u1;
+    if (a < 0.5 || a > 2) continue;
+    const ins = pairs.filter(([u, v]) => Math.abs(a * u + b - v) < 3);
+    if (!best || ins.length > best.length) best = ins;
+  }
+  if (!best || best.length < 2 || best.length < pairs.length * 0.5) return null;
+  const n = best.length, sx = best.reduce((t, p) => t + p[0], 0), sy = best.reduce((t, p) => t + p[1], 0);
+  const sxx = best.reduce((t, p) => t + p[0] * p[0], 0), sxy = best.reduce((t, p) => t + p[0] * p[1], 0);
   const d = n * sxx - sx * sx;
   if (Math.abs(d) < 1e-9) return null;
   const a = (n * sxy - sx * sy) / d, b = (sy - a * sx) / n;
-  // 合わない組（読み違えた名前）が多いときは使わない
-  const err = Math.max(...pairs.map(([u, v]) => Math.abs(a * u + b - v)));
-  return err > 6 ? null : { a, b, n };
+  return { a, b, n };
 }
 
 /**
@@ -83,8 +103,10 @@ export function upperWalls(marks, grid2, fx, fy, { tol = 14, solid = null } = {}
     if (solid) {
       const h = wallNear(H, m.cx, m.cy), v = wallNear(V, m.cy, m.cx);
       const useH = h && (!v || Math.abs(h.c - m.cy) <= Math.abs(v.c - m.cx));
-      if (useH) { const gy = nearest(ys, h.c), r = around(xs, m.cx); if (r && Math.abs(gy - h.c) < 5) seg = [[r[0], gy], [r[1], gy]]; }
-      else if (v) { const gx = nearest(xs, v.c), r = around(ys, m.cy); if (r && Math.abs(gx - v.c) < 5) seg = [[gx, r[0]], [gx, r[1]]]; }
+      // 壁は2本線（厚み 6〜9pt）のことがあるので、通り芯から 10pt 以内の線なら、その通り芯の上の壁とする。
+      // 長さは壁の線そのもの（柱から柱まで）
+      if (useH) { const gy = nearest(ys, h.c); if (Math.abs(gy - h.c) < 10) seg = [[h.a, gy], [h.b, gy]]; }
+      else if (v) { const gx = nearest(xs, v.c); if (Math.abs(gx - v.c) < 10) seg = [[gx, v.a], [gx, v.b]]; }
     } else {
       const gx = nearest(xs, m.cx), gy = nearest(ys, m.cy);
       const dx = Math.abs(gx - m.cx), dy = Math.abs(gy - m.cy);

@@ -647,7 +647,7 @@ function cornersOf(loop, minLen) {
  */
 export function mmPerPt(words) {
   for (const w of words) {
-    const m = norm(w.s).match(/(?:^|[^0-9])1\/(20|30|40|50|60|70|80|100|150|200)(?![0-9])/);
+    const m = norm(w.s).match(/(?:^|[^0-9])1\/([2-9]\d|1\d\d|200)(?![0-9])/);
     if (m) return (25.4 / 72) * Number(m[1]);
   }
   return null;

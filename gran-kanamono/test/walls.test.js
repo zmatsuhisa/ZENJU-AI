@@ -136,3 +136,16 @@ test('いくつかの弧に分けて描かれた丸（弧の間にごく小さ�
   assert.equal(parts.length, 2);
   assert.ok(parts.some((p) => p.segs.length === circle.length + inner.length));
 });
+
+test('番号で書く壁（12-1・6-2）：縦書きで1字ずつの番号もつないで拾う', async () => {
+  const { findCodeWallMarks } = await import('../public/js/walls.js');
+  const { toGlyph } = await import('../public/js/core.js');
+  const H = (str, x, y) => toGlyph({ str, transform: [6, 0, 0, 6, x, y], width: 6 * str.length * 0.6 });
+  const V = (str, x, y) => [...str].map((ch, i) => toGlyph({ str: ch, transform: [0, 6, -6, 0, x, y + i * 3.2], width: 3.2 }));
+  const legend = { page: 1, box: { x0: 900, x1: 1100, y0: 0, y1: 800 }, rows: [{ key: 'w:a', code: '12-1' }, { key: 'w:b', code: '6-2' }] };
+  const glyphs = [H('12-1', 100, 100), ...V('12-1', 200, 300), H('6-2', 300, 100), H('12-1', 950, 500)];
+  const marks = findCodeWallMarks([{ glyphs }], legend);
+  assert.deepEqual(marks.map((m) => m.code).sort(), ['12-1', '12-1', '12-1', '6-2']); // 1ページ目なので 950 の字も図面のもの
+  const m2 = findCodeWallMarks([{ glyphs: [] }, { glyphs }], legend);
+  assert.equal(m2.length, 3); // 表のページでは表の中（x 900〜1100）は除く
+});

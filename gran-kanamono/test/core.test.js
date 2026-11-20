@@ -148,3 +148,27 @@ test('1階の柱伏図：オメガの足元（柱の上下の記号の下側）�
   assert.equal(paint.filter((p) => p.hex === pink).length, 1);
   assert.ok(paint.some((p) => p.hex === green));
 });
+
+test('横向きに置いて回したページ（/Rotate 90）も正しい向きの座標で読む。戻すと元の位置', async () => {
+  const { uprightMatrix, invMatrix, applyMatrix, mulMatrix } = await import('../public/js/core.js');
+  const M = uprightMatrix(90, [0, 0, 842, 1191]);
+  // 正しい向きのページは横 1191・縦 842。PDF の (0,0) は 回すと左上
+  const [x, y] = applyMatrix(M, 0, 0);
+  assert.ok(Math.abs(x) < 1e-9 && Math.abs(y - 842) < 1e-9);
+  const [u, v] = applyMatrix(invMatrix(M), ...applyMatrix(M, 300, 500));
+  assert.ok(Math.abs(u - 300) < 1e-9 && Math.abs(v - 500) < 1e-9);
+  // 回した字（縦向きに書かれた字）は、正しい向きでは横書きになる
+  const t = mulMatrix(M, [0, 6, -6, 0, 100, 100]);
+  assert.ok(Math.abs(t[1]) < 1e-9 && t[0] > 0);
+  assert.deepEqual(uprightMatrix(0, [0, 0, 1191, 842]).map((v) => v + 0), [1, 0, 0, 1, 0, 0]); // 回していないページはそのまま
+});
+
+test('通り芯の名前の列（い・ろ・は…が横一列）は金物の記号に数えない。ほかのページの同じ表の中も数えない', () => {
+  const page = samplePage();
+  const lg = findLegend(page, segs);
+  const labels = ['い', 'ろ', 'は', 'に', 'ほ', 'へ', 'と'].map((s, i) => ({ ...T(s, 50 + i * 40, 520, 4.4), page: 0 }));
+  const p2 = [{ ...T('ろ', 700, 300, 4.4), page: 1 }, { ...T('ろ', 100, 100, 4.4), page: 1 }];
+  const before = findMarks([{ glyphs: page }], lg).marks.length;
+  const f = findMarks([{ glyphs: [...page, ...labels] }, { glyphs: p2 }], lg, { exclude: { 1: [{ x0: 690, x1: 720, y0: 290, y1: 310 }] } });
+  assert.equal(f.marks.length, before + 1); // 2ページ目の表の外の「ろ」だけ増える
+});
