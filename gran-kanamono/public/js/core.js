@@ -294,4 +294,4 @@ export function omegaFeet(legend, marks, firstFloor = []) {
 export const MARK_SCALE = 1.4;
 
 /** 塗りの強さ（画面と PDF で同じ見え方にする） */
-export const ALPHA = { band: 0.3, outer: 0.55, outline: 0.55, legend: 0.75, mark: 0.7, warn: 1, ring: 1, label: 1 };
+export const ALPHA = { band: 0.3, outer: 0.55, outline: 0.55, legend: 0.75, mark: 0.7, warn: 1, ring: 1, dim: 1, label: 1 };

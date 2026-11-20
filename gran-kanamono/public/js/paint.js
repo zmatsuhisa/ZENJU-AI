@@ -15,7 +15,7 @@ const rgbOf = (lib, hex) => {
 export async function paintPdf(lib, bytes, paint) {
   const doc = await lib.PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = doc.getPages();
-  const order = { band: 0, outer: 0, outline: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
+  const order = { band: 0, outer: 0, outline: 0, legend: 1, mark: 2, ring: 3, warn: 3, dim: 4, label: 4 };
   let font = null;
   for (const p of [...paint].sort((a, b) => order[a.kind] - order[b.kind])) {
     const page = pages[p.page];
@@ -27,8 +27,12 @@ export async function paintPdf(lib, bytes, paint) {
       page.drawText(p.text, { x: p.x, y: p.y, size: p.size || 6, font, color });
     } else if (p.kind === 'outline') {
       // 外周の線（角だけの多角形）。SVG の向き（下向きが正）に合わせて y を反転して渡す
-      const d = p.points.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(2)} ${(-y).toFixed(2)}`).join(' ') + ' Z';
+      const d = p.points.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(2)} ${(-y).toFixed(2)}`).join(' ') + (p.open ? '' : ' Z');
       page.drawSvgPath(d, { x: 0, y: 0, borderColor: color, borderWidth: p.width, borderOpacity: ALPHA.outline, borderLineCap: lib.LineCapStyle.Projecting, blendMode: lib.BlendMode.Multiply });
+    } else if (p.kind === 'dim') {
+      // 寸法の線（はしを閉じない線）
+      const d = p.points.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(2)} ${(-y).toFixed(2)}`).join(' ');
+      page.drawSvgPath(d, { x: 0, y: 0, borderColor: color, borderWidth: p.width });
     } else if (p.kind === 'ring') {
       page.drawEllipse({ x: p.cx, y: p.cy, xScale: p.rx ?? p.r, yScale: p.ry ?? p.r, borderColor: color, borderWidth: 0.8, borderOpacity: ALPHA.ring });
     } else if (p.kind === 'band' || p.kind === 'outer') {

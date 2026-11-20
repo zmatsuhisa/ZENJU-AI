@@ -154,3 +154,26 @@ test('外周の角を通り芯に合わせる（地縄寸法図と同じく芯�
   const pts = snapToGrid(face, grid, 3, 8);
   assert.deepEqual(pts.map((p) => p.join(',')).sort(), ['100,100', '100,300', '400,100', '400,300']);
 });
+
+test('空きスパン：通り芯の上の立上りどうしの間を、寸法の数字（なければ縮尺）で mm にする', async () => {
+  const { wallsOnGrid, findSpans, gridMm, mmPerPt } = await import('../public/js/kiso.js');
+  // 通り芯 x=100・137・211、y=100・174（1pt＝24.6mm ほど。910・1820 の寸法の数字がある）
+  const grid = { xs: [100, 137, 211], ys: [100, 174] };
+  const words = mergeWords([H('910', 118.5 - 5.4, 60), H('1820', 174 - 7.2, 60), H('基礎伏図 S:1/70', 300, 40)]);
+  const mp = mmPerPt(words);
+  assert.ok(Math.abs(mp - 24.69) < 0.01);
+  const pos = gridMm(grid, words, mp);
+  assert.equal(pos.x.get(211), 2730);
+  // 立上り（平行な2本の線、通り芯から ±3pt）：外まわりの4辺と、x=137 の縦の壁
+  const segs = [];
+  const wall = (x0, y0, x1, y1) => {
+    if (y0 === y1) segs.push([x0, y0 - 3, x1, y0 - 3], [x0, y0 + 3, x1, y0 + 3]);
+    else segs.push([x0 - 3, y0, x0 - 3, y1], [x0 + 3, y0, x0 + 3, y1]);
+  };
+  wall(100, 100, 211, 100); wall(100, 174, 211, 174); wall(100, 100, 100, 174); wall(211, 100, 211, 174); wall(137, 100, 137, 174);
+  const w = wallsOnGrid(segs, grid, { x0: 97, x1: 214, y0: 97, y1: 177 });
+  assert.equal(w.V.length, 3); assert.equal(w.H.length, 2);
+  const sp = findSpans(w, mp, { pos });
+  assert.deepEqual(sp.filter((s) => s.dir === 'x').map((s) => s.mm).sort((a, b) => a - b), [910, 1820]);
+  assert.equal(sp.filter((s) => s.dir === 'x').length, 2); // 上と下の壁で同じスパンは1回だけ
+});

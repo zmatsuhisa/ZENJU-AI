@@ -1,8 +1,9 @@
 // pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
 import { toGlyph, findLegend, findMarks } from './core.js';
 import { findWallLegend, findWallMarks, excludeZones } from './walls.js';
-import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, findOuterBand, gridLines } from './kiso.js';
+import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, findOuterBand, gridLines, wallsOnGrid, findSpans, gridMm, mmPerPt } from './kiso.js';
 import { dropDashes } from './walls.js';
+import { floorPages, gridLabels, fitAxis, upperWalls } from './upper.js';
 
 /** ページごとの文字（toGlyph の形） */
 export async function readGlyphs(doc) {
@@ -128,6 +129,16 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
       const grid = gridLines(segs[i].filter((x) => !solidSet.has(x)));
       const ol = findOuterBand(solid, pm.filter((m) => m.kind !== 'dok').map((m) => [m.cx, m.cy]), { grid });
       if (ol) (kiso.outer ??= []).push({ page: i, thick: 6, ...ol });
+      // 空きスパン：外周の中の立上り（通り芯の上の壁）と立上りの間の寸法
+      if (ol) {
+        const xs = ol.corners.map((p) => p[0]), ys = ol.corners.map((p) => p[1]);
+        const box = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+        const mp = mmPerPt(words);
+        if (mp) {
+          const sp = findSpans(wallsOnGrid(solid, grid, box), mp, { pos: gridMm(grid, words, mp) });
+          (kiso.spans ??= []).push(...sp.map((x) => ({ page: i, ...x })));
+        }
+      }
     }
     if (list && !kiso.list) kiso.list = list;
   }
@@ -138,5 +149,16 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
     const t = p.glyphs.map((g) => g.s).join('').normalize('NFKC').replace(/\s+/g, '');
     if (/1階.*伏図/.test(t) && !/基礎伏図/.test(t)) firstFloor.push(i);
   });
-  return { pages, legend, found, walls, kiso, firstFloor };
+  // 2階建て：2階の柱伏図の耐力壁（壁の記号）を、通り芯の名前で 1階の柱伏図に落とし込む
+  let upper = null;
+  const fl = floorPages(pages);
+  if (walls && fl.first != null && fl.second != null && fl.first !== fl.second) {
+    const gridOf = (i) => { const solid = new Set(dropDashes(segs[i])); return gridLines(segs[i].filter((x) => !solid.has(x))); };
+    const g1 = gridOf(fl.first), g2 = gridOf(fl.second);
+    const l1 = gridLabels(pages[fl.first].glyphs, g1), l2 = gridLabels(pages[fl.second].glyphs, g2);
+    const fx = fitAxis(l2.x, l1.x), fy = fitAxis(l2.y, l1.y);
+    const m2 = walls.marks.filter((m) => m.page === fl.second && !walls.legend.rows.find((r) => r.key === m.key)?.struck);
+    if (fx && fy && m2.length) upper = { page: fl.first, from: fl.second, walls: upperWalls(m2, g2, fx, fy, { solid: dropDashes(segs[fl.second]) }) };
+  }
+  return { pages, legend, found, walls, kiso, firstFloor, upper };
 }

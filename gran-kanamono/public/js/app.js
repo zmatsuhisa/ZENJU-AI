@@ -7,12 +7,14 @@ import { countByKey, buildWallPaint } from './walls.js';
 import { kisoRows, buildKisoPaint, kisoKey } from './kiso.js';
 import { analyze } from './pdfread.js';
 import { paintPdf } from './paint.js';
+import { upperPaint } from './upper.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs', import.meta.url).href;
 const PDF_OPTS = {
   cMapUrl: new URL('../vendor/cmaps/', import.meta.url).href, cMapPacked: true,
   standardFontDataUrl: new URL('../vendor/standard_fonts/', import.meta.url).href,
 };
+const UPPER_KEY = 'up:2F';
 const STORE = 'gran-kanamono.colors.v3'; // v3：現場で決めた色（フック青・シナだいだい・オメガ15緑・20黄・Hi-28桃・ハイパーハード濃い水色）
 const PLAN_SCALE = 2.2; // 図面の下書き表示の細かさ（拡大しても記号が読める程度）
 
@@ -31,6 +33,7 @@ function initialColors(saved) {
   const c = {};
   if (st.legend) Object.assign(c, defaultColors(st.legend.rows, saved));
   if (st.walls) Object.assign(c, defaultColors(st.walls.legend.rows, saved, WALL_ORDER));
+  if (st.upper) c[UPPER_KEY] = saved[UPPER_KEY] && (saved[UPPER_KEY] === NONE || colorHex(saved[UPPER_KEY])) ? saved[UPPER_KEY] : 'brown';
   // 基礎：現場の手書きに合わせたはじめの色（人通口＝だいだい、開口補強＝桃、ホールダウン＝赤、FG1＝水色…）
   for (const r of kisoAllRows()) {
     const sv = saved[r.key];
@@ -74,13 +77,13 @@ async function openFile(file) {
     st.doc?.destroy();
     // pdf.js は渡したデータを手放すことがあるので、写しを渡す（保存のときに元のデータを使う）
     st.doc = await pdfjs.getDocument({ ...PDF_OPTS, data: st.bytes.slice() }).promise;
-    const { legend, found, walls, kiso, firstFloor } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
+    const { legend, found, walls, kiso, firstFloor, upper } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
     if (!legend && !walls && !kiso) {
       fileMsg(`「${file.name}」から「金物リスト」や「軸組みの種類と壁倍率」の表が見つかりませんでした。構造図（金物図）を選んでください。文字や線が画像になっているPDF（スキャンなど）は、今は読めません。`, 'error');
       status('表なし', true);
       return;
     }
-    st.legend = legend; st.found = found; st.walls = walls; st.kiso = kiso; st.firstFloor = firstFloor || [];
+    st.legend = legend; st.found = found; st.walls = walls; st.kiso = kiso; st.firstFloor = firstFloor || []; st.upper = upper;
     st.colors = initialColors(loadSaved());
     st.open = null;
     drop.classList.add('has');
@@ -125,15 +128,20 @@ function drawView(view, paint) {
   c.width = view.base.width; c.height = view.base.height;
   const ctx = c.getContext('2d');
   ctx.drawImage(view.base, 0, 0);
-  const order = { band: 0, outer: 0, outline: 0, legend: 1, mark: 2, ring: 3, warn: 3, label: 4 };
+  const order = { band: 0, outer: 0, outline: 0, legend: 1, mark: 2, ring: 3, warn: 3, dim: 4, label: 4 };
   for (const p of paint.filter((q) => q.page === view.pageIndex).sort((a, b) => order[a.kind] - order[b.kind])) {
     ctx.save();
     ctx.globalAlpha = ALPHA[p.kind];
-    if (p.kind === 'outline') {
+    if (p.kind === 'dim') {
+      ctx.beginPath();
+      p.points.forEach(([x, y], k) => { const [a, b] = view.at(x, y); if (k) ctx.lineTo(a, b); else ctx.moveTo(a, b); });
+      ctx.strokeStyle = p.hex; ctx.lineWidth = Math.max(1, p.width * view.scale);
+      ctx.stroke();
+    } else if (p.kind === 'outline') {
       ctx.globalCompositeOperation = 'multiply';
       ctx.beginPath();
       p.points.forEach(([x, y], k) => { const [a, b] = view.at(x, y); if (k) ctx.lineTo(a, b); else ctx.moveTo(a, b); });
-      ctx.closePath();
+      if (!p.open) ctx.closePath();
       ctx.strokeStyle = p.hex; ctx.lineWidth = p.width * view.scale; ctx.lineJoin = 'miter';
       ctx.stroke();
     } else if (p.kind === 'label') {
@@ -161,6 +169,7 @@ function currentPaint() {
   const out = [];
   if (st.legend) out.push(...buildPaint(st.legend, st.found.marks, st.colors, { firstFloor: st.firstFloor }));
   if (st.walls) out.push(...buildWallPaint(st.walls.legend, st.walls.marks, st.colors, colorHex));
+  if (st.upper) out.push(...upperPaint(st.upper, colorHex(st.colors[UPPER_KEY])));
   if (st.kiso) out.push(...buildKisoPaint(st.kiso, st.colors, colorHex));
   return out;
 }
@@ -168,7 +177,7 @@ function currentPaint() {
 /** 基礎の行（凡例のホールダウン・人通口、図面にある開口補強・梁符号・スラブ・独立基礎、基礎リストの鉄筋の本数） */
 function kisoAllRows() {
   if (!st.kiso) return [];
-  const rows = kisoRows(st.kiso.legend, st.kiso.marks, st.kiso.list, st.kiso.outer);
+  const rows = kisoRows(st.kiso.legend, st.kiso.marks, st.kiso.list, st.kiso.outer, st.kiso.spans);
   if (st.kiso.list) {
     const n = st.kiso.list.rebars.filter((r) => !r.panel?.unused).length;
     rows.push({ key: kisoKey('rebar', ''), kind: 'rebar', text: '2-D13', name: '鉄筋の本数（基礎リスト）', struck: false, n, def: 'red', ring: true });
@@ -195,12 +204,13 @@ function groups() {
     const L = st.walls.legend, cnt = countByKey(st.walls.marks);
     out.push({
       id: 'kabe', head: '壁（筋かい・面材）', page: L.page, title: L.title, box: L.box, rowH: L.rowH,
-      rows: L.rows.map((r) => ({ src: r, key: r.key, symbol: r.symbol, name: r.label || '（名前なし）', sub: r.rate != null ? `壁倍率 ${r.rate}` : '', struck: r.struck, n: cnt.get(r.key) || 0 })),
+      rows: [...L.rows.map((r) => ({ src: r, key: r.key, symbol: r.symbol, name: r.label || '（名前なし）', sub: r.rate != null ? `壁倍率 ${r.rate}` : '', struck: r.struck, n: cnt.get(r.key) || 0 })),
+        ...(st.upper ? [{ src: { name: '2階の耐力壁' }, key: UPPER_KEY, text: '2階', small: true, name: '2階の耐力壁の位置（1階の図面に線で落とす）', sub: `${st.upper.from + 1}ページ目 → ${st.upper.page + 1}ページ目`, struck: false, n: st.upper.walls.length }] : [])],
     });
   }
   if (st.kiso) {
     const L = st.kiso.legend;
-    const subOf = { outer: '外まわりの壁に沿って帯', hd: 'ホールダウン（番号付き）', w: '人通口', kaiko: '開口補強', fg: '梁符号', slab: 'スラブ', dok: '独立基礎', rebar: '断面の鉄筋の本数に輪' };
+    const subOf = { span: '立上りの間に赤い寸法（mm）', outer: '外まわりの壁に沿って帯', hd: 'ホールダウン（番号付き）', w: '人通口', kaiko: '開口補強', fg: '梁符号', slab: 'スラブ', dok: '独立基礎', rebar: '断面の鉄筋の本数に輪' };
     out.push({
       id: 'kiso', head: '基礎（基礎伏図・基礎リスト）', page: L ? L.page : st.kiso.list.page, title: L ? L.title : '基礎リスト', box: L ? L.box : null, rowH: 20,
       rows: kisoAllRows().map((r) => ({ src: r, key: r.key, text: r.text, small: true, name: r.name, sub: subOf[r.kind] || '', struck: r.struck, n: r.n, nLabel: r.kind === 'rebar' ? '基礎リストに' : '図面に' })),

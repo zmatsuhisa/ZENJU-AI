@@ -191,9 +191,10 @@ export function hdColor(code = '') {
  * 画面に出す行（色を決める単位）と、はじめの色。
  * 凡例のホールダウンの行（斜線は「使わない」）、人通口、開口補強、図面にある梁符号・スラブ・独立基礎。
  */
-export function kisoRows(legend, marks, list = null, outer = null) {
+export function kisoRows(legend, marks, list = null, outer = null, spans = null) {
   const rows = [];
   if (outer?.length) rows.push({ key: kisoKey('outer', ''), kind: 'outer', text: '外周', name: `外周の基礎（外まわりの立上り・角 ${outer.reduce((a, o) => a + o.corners.length, 0)} か所）`, struck: false, n: outer.length, def: 'sky' });
+  if (spans?.length) rows.push({ key: kisoKey('span', ''), kind: 'span', text: '寸法', name: '空きスパン（立上りと立上りの間の寸法・芯から芯）', struck: false, n: spans.length, def: 'red' });
   const cnt = (key) => marks.filter((m) => m.key === key).length;
   const seen = new Set();
   for (const r of legend?.rows || []) {
@@ -271,8 +272,10 @@ export function findKisoList(words, segs, page = 0) {
  * 塗るもの（core.js の buildPaint と同じ形）。
  * ホールダウンには番号（左上から右下の順）を付け、凡例の行にも同じ色を付ける。
  */
-export function buildKisoPaint({ legend, marks, list, outer }, colors, colorHex) {
+export function buildKisoPaint({ legend, marks, list, outer, spans }, colors, colorHex) {
   const out = [];
+  const spanHex = colorHex(colors[kisoKey('span', '')]);
+  if (spanHex) out.push(...spanPaint(spans || [], spanHex));
   const outerHex = colorHex(colors[kisoKey('outer', '')]);
   // 外周：外の縁から壁の厚みの半分だけ内側の線を、壁の厚みの太さで引く
   if (outerHex) for (const o of outer || []) out.push({ kind: 'outline', page: o.page, hex: outerHex, points: o.path, width: o.thick || 6 });
@@ -637,4 +640,162 @@ function cornersOf(loop, minLen) {
   let x = loop[0][0], y = loop[0][1];
   for (const r of runs) { pts.push([x, y]); x += r.d[0] * r.len; y += r.d[1] * r.len; }
   return pts.length >= 4 ? pts : null;
+}
+
+/**
+ * 図面の縮尺（「1/70」「S:1/70」などの文字）から、PDF の 1pt が実物の何 mm かを返す。見つからなければ null
+ */
+export function mmPerPt(words) {
+  for (const w of words) {
+    const m = norm(w.s).match(/(?:^|[^0-9])1\/(20|30|40|50|60|70|80|100|150|200)(?![0-9])/);
+    if (m) return (25.4 / 72) * Number(m[1]);
+  }
+  return null;
+}
+
+/**
+ * 基礎の立上り（通り芯の上の壁）を通り芯ごとに求める。
+ * 平行な2本の線の壁（wallLines）のうち、通り芯から tol 以内にあるものを集め、gap 以下の切れ目（人通口・柱の四角など）はつなぐ。
+ * @param segs 実線の線分 @param grid { xs, ys }（通り芯） @param box 建物の範囲（外周の角の範囲）
+ * @returns { H: [{ y, a, b }], V: [{ x, a, b }] }（H＝横の壁：y の通り芯で x が a〜b）
+ */
+export function wallsOnGrid(segs, grid, box, { tol = 8, gap = 30, minLen = 20 } = {}) {
+  const kept = wallLines(segs, { x0: box.x0 - tol, x1: box.x1 + tol, y0: box.y0 - tol, y1: box.y1 + tol });
+  const pick = (coords, horiz) => {
+    const out = [];
+    for (const g of coords) {
+      if (g < (horiz ? box.y0 : box.x0) - tol || g > (horiz ? box.y1 : box.x1) + tol) continue;
+      const iv = [];
+      for (const s of kept) {
+        const isH = Math.abs(s[1] - s[3]) < 0.05;
+        if (isH !== horiz) continue;
+        const c = horiz ? s[1] : s[0];
+        if (Math.abs(c - g) > tol) continue;
+        // いちばん近い通り芯の壁とする（近くに通り芯が2本あるとき、両方に同じ壁を数えない）
+        if (coords.some((o) => o !== g && Math.abs(c - o) < Math.abs(c - g))) continue;
+        const a = horiz ? Math.min(s[0], s[2]) : Math.min(s[1], s[3]), b = horiz ? Math.max(s[0], s[2]) : Math.max(s[1], s[3]);
+        if (b - a > 7) iv.push([a, b]);
+      }
+      iv.sort((p, q) => p[0] - q[0]);
+      const merged = [];
+      for (const [a, b] of iv) {
+        const last = merged[merged.length - 1];
+        if (last && a <= last[1] + gap) last[1] = Math.max(last[1], b); else merged.push([a, b]);
+      }
+      for (const [a, b] of merged) if (b - a >= minLen) out.push(horiz ? { y: g, a, b } : { x: g, a, b });
+    }
+    return out;
+  };
+  return { H: pick(grid.ys, true), V: pick(grid.xs, false) };
+}
+
+/**
+ * 通り芯の位置を実物の mm にする（寸法線の数字を使う）。
+ * となりの通り芯のちょうど真ん中にある数字（横の通り芯の間は横書き、縦は縦書き）をその間の寸法とし、
+ * 数字のない間は図面の縮尺から求める。PDF の位置は 0.5pt ほどずれるので、縮尺だけで出すより正しい。
+ * @returns { x: Map(通り芯の位置 → mm), y: Map }
+ */
+export function gridMm(grid, words, mmPt) {
+  const nums = words.filter((w) => /^\d{2,5}$/.test(w.s));
+  const chain = (coords, horiz) => {
+    const pos = new Map();
+    if (!coords.length) return pos;
+    // 通り芯 i と j（4本先まで）のちょうど真ん中にある数字を、その間の寸法とする（寸法線は何本かの通り芯をまたぐこともある）
+    const edges = [];
+    for (let i = 0; i < coords.length; i++) for (let j = i + 1; j < coords.length && j <= i + 4; j++) {
+      const a = coords[i], b = coords[j], mid = (a + b) / 2, est = (b - a) * (mmPt || 0);
+      const cnt = new Map();
+      for (const w of nums) {
+        if (!!w.vertical === horiz) continue;
+        if (Math.abs((horiz ? w.cx : w.cy) - mid) > 1.5) continue;
+        const v = Number(w.s);
+        if (mmPt && Math.abs(v - est) > Math.max(25, est * 0.04)) continue; // 縮尺と大きく違う数字（高さなど）は使わない
+        cnt.set(v, (cnt.get(v) || 0) + 1);
+      }
+      const v = [...cnt].sort((p, q) => q[1] - p[1])[0]?.[0];
+      if (v) edges.push([i, j, v]);
+    }
+    // 数字から縮尺を出し直す（数字でつながらない通り芯に使う）
+    const r = edges.map(([i, j, v]) => v / (coords[j] - coords[i])).sort((p, q) => p - q);
+    const k = r.length ? r[r.length >> 1] : mmPt || 0;
+    const mm = new Array(coords.length).fill(null);
+    for (let start = 0; start < coords.length; start++) {
+      if (mm[start] != null) continue;
+      // 前の通り芯から縮尺で置き、そこから数字でつながる通り芯をたどる
+      const prev = start - 1;
+      mm[start] = prev >= 0 ? mm[prev] + (coords[start] - coords[prev]) * k : 0;
+      const queue = [start];
+      while (queue.length) {
+        const i = queue.shift();
+        for (const [p, q, v] of edges) {
+          if (p === i && mm[q] == null) { mm[q] = mm[i] + v; queue.push(q); }
+          else if (q === i && mm[p] == null) { mm[p] = mm[i] - v; queue.push(p); }
+        }
+      }
+    }
+    coords.forEach((c, i) => pos.set(c, mm[i]));
+    return pos;
+  };
+  return { x: chain(grid.xs, true), y: chain(grid.ys, false) };
+}
+
+/**
+ * 空きスパン：基礎の立上りと立上りの間の寸法（芯から芯）。
+ * 横の壁ごとに、その壁にぶつかる縦の壁の位置を並べ、となりどうしの間を1つのスパンとする（縦も同じ）。
+ * 同じ2本の壁の間のスパンは1回だけ（建物のいちばん外側＝外周に近い壁の上に書く）。
+ * @returns [{ dir: 'x'|'y', a, b, at, mm }]（dir 'x'＝横向きの寸法：x が a〜b、y＝at の壁の上）
+ */
+export function findSpans(walls, mmPt, { tol = 4, minMm = 300, pos = null } = {}) {
+  const out = [], seen = new Map();
+  const add = (dir, a, b, at, edge) => {
+    const m = pos?.[dir];
+    const raw = m?.has(a) && m?.has(b) ? Math.abs(m.get(b) - m.get(a)) : (b - a) * mmPt;
+    const mm = Math.round(raw / 5) * 5;
+    if (mm < minMm) return;
+    const key = `${dir}:${Math.round(a)}:${Math.round(b)}`;
+    const prev = seen.get(key);
+    if (prev && prev.edge <= edge) return;
+    const sp = { dir, a, b, at, mm, edge };
+    if (prev) out[out.indexOf(prev)] = sp; else out.push(sp);
+    seen.set(key, sp);
+  };
+  const xs = walls.V.map((v) => v.x), ys = walls.H.map((h) => h.y);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  for (const h of walls.H) {
+    const cross = [...new Set(walls.V.filter((v) => v.x >= h.a - tol && v.x <= h.b + tol && h.y >= v.a - tol && h.y <= v.b + tol).map((v) => v.x))].sort((p, q) => p - q);
+    for (let i = 1; i < cross.length; i++) add('x', cross[i - 1], cross[i], h.y, Math.min(h.y - minY, maxY - h.y));
+  }
+  for (const v of walls.V) {
+    const cross = [...new Set(walls.H.filter((h) => h.y >= v.a - tol && h.y <= v.b + tol && v.x >= h.a - tol && v.x <= h.b + tol).map((h) => h.y))].sort((p, q) => p - q);
+    for (let i = 1; i < cross.length; i++) add('y', cross[i - 1], cross[i], v.x, Math.min(v.x - minX, maxX - v.x));
+  }
+  return out.map(({ edge, ...s }) => s);
+}
+
+/**
+ * 空きスパンの赤い寸法（線・両端の短い線・数字）。壁から off だけ部屋の内側（建物の真ん中の側）に引く
+ */
+export function spanPaint(spans, hex, { off = 7, tick = 2.5, size = 7.5 } = {}) {
+  const out = [];
+  const byPage = new Map();
+  for (const s of spans) (byPage.get(s.page) || byPage.set(s.page, []).get(s.page)).push(s);
+  for (const [page, list] of byPage) {
+    const xs = list.filter((s) => s.dir === 'y').map((s) => s.at), ys = list.filter((s) => s.dir === 'x').map((s) => s.at);
+    const cx = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0, cy = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0;
+    for (const s of list) {
+      const t = String(s.mm);
+      if (s.dir === 'x') {
+        const y = s.at + (s.at > cy ? -off : off);
+        out.push({ kind: 'dim', page, hex, width: 0.7, points: [[s.a, y], [s.b, y]] });
+        for (const x of [s.a, s.b]) out.push({ kind: 'dim', page, hex, width: 0.7, points: [[x, y - tick], [x, y + tick]] });
+        out.push({ kind: 'label', page, hex, x: (s.a + s.b) / 2 - t.length * size * 0.28, y: y + (s.at > cy ? -size - 0.8 : 1.2), text: t, size });
+      } else {
+        const x = s.at + (s.at > cx ? -off : off);
+        out.push({ kind: 'dim', page, hex, width: 0.7, points: [[x, s.a], [x, s.b]] });
+        for (const y of [s.a, s.b]) out.push({ kind: 'dim', page, hex, width: 0.7, points: [[x - tick, y], [x + tick, y]] });
+        out.push({ kind: 'label', page, hex, x: s.at > cx ? x - t.length * size * 0.56 - 1.5 : x + 1.5, y: (s.a + s.b) / 2 - size * 0.35, text: t, size });
+      }
+    }
+  }
+  return out;
 }

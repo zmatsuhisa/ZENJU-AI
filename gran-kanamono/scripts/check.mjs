@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import * as PDFLib from 'pdf-lib';
 import { analyze } from '../public/js/pdfread.js';
+import { upperPaint } from '../public/js/upper.js';
 import { countBySymbol, defaultColors, buildPaint, colorHex, WALL_ORDER } from '../public/js/core.js';
 import { countByKey, buildWallPaint } from '../public/js/walls.js';
 import { kisoRows, buildKisoPaint, kisoKey } from '../public/js/kiso.js';
@@ -20,7 +21,7 @@ const doc = await pdfjs.getDocument({
   data: new Uint8Array(bytes), cMapUrl: join(root, 'node_modules/pdfjs-dist/cmaps/'), cMapPacked: true,
   standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/'), verbosity: 0,
 }).promise;
-const { legend, found, walls, kiso, firstFloor } = await analyze(pdfjs, doc);
+const { legend, found, walls, kiso, firstFloor, upper } = await analyze(pdfjs, doc);
 if (!legend && !walls && !kiso) { console.log('金物リストも壁の表も見つかりません'); process.exit(2); }
 if (legend) {
   const cnt = countBySymbol(found.marks);
@@ -35,7 +36,7 @@ if (walls) {
 }
 let kisoColors = {};
 if (kiso) {
-  const rows = kisoRows(kiso.legend, kiso.marks, kiso.list, kiso.outer);
+  const rows = kisoRows(kiso.legend, kiso.marks, kiso.list, kiso.outer, kiso.spans);
   console.log(`基礎: 基礎伏図 ${kiso.planPages.map((p) => p + 1).join('・')}ページ / 凡例 ${kiso.legend ? kiso.legend.rows.length + '行' : 'なし'} / 基礎リスト ${kiso.list ? kiso.list.page + 1 + 'ページ' : 'なし'}`);
   for (const r of rows) { console.log(`  ${r.struck ? '[斜線]' : '      '} ${r.text.padEnd(6)} 図面に ${String(r.n).padStart(2)}  ${r.name}`); kisoColors[r.key] = r.def; }
   if (kiso.list) {
@@ -50,7 +51,8 @@ for (const m of walls?.marks || []) byPage[m.page + 1] = (byPage[m.page + 1] || 
 console.log('ページごと（金物/壁）', Object.fromEntries(Object.entries(byPage).map(([p, s]) => [p, `${(s.match(/k/g) || []).length}/${(s.match(/w/g) || []).length}`])));
 if (out) {
   const colors = { ...(legend ? defaultColors(legend.rows) : {}), ...(walls ? defaultColors(walls.legend.rows, {}, WALL_ORDER) : {}) };
-  const paint = [...(legend ? buildPaint(legend, found.marks, colors, { firstFloor }) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : []), ...(kiso ? buildKisoPaint(kiso, kisoColors, colorHex) : [])];
+  if (upper) console.log(`2階の耐力壁: ${upper.from + 1}ページ目の ${upper.walls.length} か所を ${upper.page + 1}ページ目に落とす`);
+const paint = [...(legend ? buildPaint(legend, found.marks, colors, { firstFloor }) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : []), ...(kiso ? buildKisoPaint(kiso, kisoColors, colorHex) : []), ...upperPaint(upper, colorHex('brown'))];
   writeFileSync(out, await paintPdf(PDFLib, bytes, paint));
   console.log('書き出し:', out);
 }
