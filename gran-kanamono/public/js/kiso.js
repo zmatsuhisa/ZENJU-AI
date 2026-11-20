@@ -166,16 +166,25 @@ export function findKisoMarks(words, legend, exclude = []) {
 
 export const kisoKey = (kind, code) => `f:${kind}:${code}`;
 
-/** 梁符号のはじめの色（現場の手書きに合わせる。FG3＝特記なしは塗らない） */
+/** 梁符号のはじめの色（現場の手書きに合わせる：FG1＝桃、FG2＝水色、FG3＝黄、FG4＝黄緑） */
 export function fgColor(code) {
   const c = code.toUpperCase();
-  if (/^FG1/.test(c)) return 'sky';
-  if (/^FG2/.test(c)) return 'green';
-  if (/^FG3/.test(c)) return 'none';
-  if (/^FG4/.test(c)) return 'orange';
-  if (/^FG5/.test(c)) return 'pink';
-  if (/^FG6/.test(c)) return 'purple';
-  return 'lime';
+  if (/^FG1/.test(c)) return 'pink';
+  if (/^FG2/.test(c)) return 'sky';
+  if (/^FG3/.test(c)) return 'yellow';
+  if (/^FG4/.test(c)) return 'lime';
+  if (/^FG5/.test(c)) return 'blue';
+  if (/^FG6/.test(c)) return 'gray';
+  return 'gray';
+}
+
+/** ホールダウンのはじめの色（金物の色と合わせる：15kN＝緑、20kN＝黄、Hi＝桃、ほか＝赤） */
+export function hdColor(code = '') {
+  const c = code.normalize('NFKC').toUpperCase();
+  if (/^15/.test(c)) return 'green';
+  if (/^20/.test(c)) return 'yellow';
+  if (/HI/.test(c)) return 'pink';
+  return 'red';
 }
 
 /**
@@ -197,7 +206,7 @@ export function kisoRows(legend, marks, list = null, outer = null) {
       continue;
     }
     seen.add(key);
-    rows.push({ key, kind: r.kind, text: r.kind === 'hd' ? r.code : 'W600', name: r.spec || (r.kind === 'w' ? '人通口' : ''), struck: r.struck, n: cnt(key), legendRow: r, def: r.struck ? 'none' : (r.kind === 'hd' ? 'red' : 'orange') });
+    rows.push({ key, kind: r.kind, text: r.kind === 'hd' ? r.code : 'W600', name: r.spec || (r.kind === 'w' ? '人通口' : ''), struck: r.struck, n: cnt(key), legendRow: r, def: r.struck ? 'none' : (r.kind === 'hd' ? hdColor(r.code) : 'orange') });
   }
   if (!seen.has(kisoKey('w', 'W')) && cnt(kisoKey('w', 'W'))) rows.push({ key: kisoKey('w', 'W'), kind: 'w', text: 'W600', name: '人通口', struck: false, n: cnt(kisoKey('w', 'W')), def: 'orange' });
   // 図面にだけあるもの
@@ -206,7 +215,7 @@ export function kisoRows(legend, marks, list = null, outer = null) {
   const order = { hd: 0, kaiko: 1, fg: 2, slab: 3, dok: 4 };
   const fgOf = (list?.panels || []);
   for (const m of [...extra.values()].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.code.localeCompare(b.code, 'ja', { numeric: true }))) {
-    const def = m.kind === 'hd' ? 'red' : m.kind === 'kaiko' ? 'pink' : m.kind === 'fg' ? fgColor(m.code) : m.kind === 'slab' ? 'pink' : 'orange';
+    const def = m.kind === 'hd' ? hdColor(m.code) : m.kind === 'kaiko' ? 'purple' : m.kind === 'fg' ? fgColor(m.code) : m.kind === 'slab' ? 'brown' : 'orange';
     const name = m.kind === 'hd' ? 'ホールダウン（凡例にない記号）'
       : m.kind === 'kaiko' ? `開口補強 ${m.code}`
       : m.kind === 'fg' ? `梁 ${m.code}`
@@ -221,7 +230,7 @@ export function kisoRows(legend, marks, list = null, outer = null) {
     const key = kisoKey(isSlab ? 'slab' : 'fg', code);
     const has = rows.find((r) => r.key === key);
     if (has) { if (p.unused) has.name += '（基礎リストでは×）'; continue; }
-    rows.push({ key, kind: isSlab ? 'slab' : 'fg', text: code, name: `${isSlab ? 'スラブ' : '梁'} ${code}（基礎リストのみ${p.unused ? '・×' : ''}）`, struck: p.unused, n: 0, def: p.unused ? 'none' : isSlab ? 'pink' : fgColor(code) });
+    rows.push({ key, kind: isSlab ? 'slab' : 'fg', text: code, name: `${isSlab ? 'スラブ' : '梁'} ${code}（基礎リストのみ${p.unused ? '・×' : ''}）`, struck: p.unused, n: 0, def: p.unused ? 'none' : isSlab ? 'brown' : fgColor(code) });
   }
   return rows;
 }

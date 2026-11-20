@@ -2,13 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { toGlyph } from '../public/js/core.js';
-import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, kisoRows, buildKisoPaint, kisoKey, fgColor, defaultSlab } from '../public/js/kiso.js';
+import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, kisoRows, buildKisoPaint, kisoKey, fgColor, hdColor, defaultSlab } from '../public/js/kiso.js';
 
 // 横書きの字（1行分）
 const H = (str, x, y, size = 6) => toGlyph({ str, transform: [size, 0, 0, size, x, y], width: size * [...str].length * 0.6 });
 // 縦書きの字（1字ずつ、下から上へ）
 const V = (str, x, y, size = 4.8) => [...str].map((ch, i) => toGlyph({ str: ch, transform: [0, size, -size, 0, x, y + i * size], width: size }));
-const hex = (id) => ({ red: '#f00', orange: '#f90', pink: '#f9c', sky: '#3cf', green: '#4c5', lime: '#bf3', purple: '#b7f' }[id] || null);
+const hex = (id) => ({ yellow: '#ff0', brown: '#c85', blue: '#47f', red: '#f00', orange: '#f90', pink: '#f9c', sky: '#3cf', green: '#4c5', lime: '#bf3', purple: '#b7f' }[id] || null);
 
 test('1字ずつの縦書き（開口補強b・W600）を単語にまとめる', () => {
   const words = mergeWords([...V('開口補強b', 100, 200), ...V('W600', 80, 200), H('W600', 300, 300)]);
@@ -68,9 +68,9 @@ test('図面の記号：ホールダウン・人通口・開口補強・梁符�
 
   const rows = kisoRows(lg, marks, null);
   const r15 = rows.find((r) => r.key === kisoKey('hd', '15kN'));
-  assert.equal(r15.n, 2); assert.equal(r15.def, 'red');
+  assert.equal(r15.n, 2); assert.equal(r15.def, 'green');
   assert.equal(rows.find((r) => r.key === kisoKey('hd', '20kN')).struck, true);
-  assert.equal(rows.find((r) => r.key === kisoKey('fg', 'FG3')).def, 'none');
+  assert.equal(rows.find((r) => r.key === kisoKey('fg', 'FG3')).def, 'yellow');
 
   const colors = Object.fromEntries(rows.map((r) => [r.key, r.struck ? 'none' : r.def]));
   const paint = buildKisoPaint({ legend: lg, marks, list: null }, colors, hex);
@@ -81,12 +81,15 @@ test('図面の記号：ホールダウン・人通口・開口補強・梁符�
   assert.equal(paint.filter((p) => p.kind === 'warn').length, 1);
 });
 
-test('梁符号のはじめの色（FG1 水色・FG4 だいだい・FG5 桃・FG3 塗らない）', () => {
-  assert.equal(fgColor('FG1'), 'sky');
-  assert.equal(fgColor('FG1A'), 'sky');
-  assert.equal(fgColor('FG4A'), 'orange');
-  assert.equal(fgColor('FG5'), 'pink');
-  assert.equal(fgColor('FG3'), 'none');
+test('梁符号・ホールダウンのはじめの色（FG1 桃・FG2 水色・FG3 黄・FG4 黄緑、15kN 緑・20kN 黄・Hi 桃）', () => {
+  assert.equal(fgColor('FG1'), 'pink');
+  assert.equal(fgColor('FG1A'), 'pink');
+  assert.equal(fgColor('FG2B'), 'sky');
+  assert.equal(fgColor('FG3'), 'yellow');
+  assert.equal(fgColor('FG4A'), 'lime');
+  assert.equal(hdColor('15kN'), 'green');
+  assert.equal(hdColor('20kN'), 'yellow');
+  assert.equal(hdColor('Hi28'), 'pink');
 });
 
 test('基礎リスト：×が描かれた断面は使わない。鉄筋の本数はいちばん近い見出しの断面に属させる', () => {
