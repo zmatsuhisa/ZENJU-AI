@@ -13,6 +13,7 @@ export const PALETTE = [
   { id: 'red', name: '赤', hex: '#F4475B' },
   { id: 'pink', name: '桃', hex: '#FF86CF' },
   { id: 'blue', name: '青', hex: '#4D7BFF' },
+  { id: 'deepsky', name: '濃い水色', hex: '#0A8FD8' },
   { id: 'lime', name: '黄緑', hex: '#B9E62A' },
   { id: 'brown', name: '茶', hex: '#C08A52' },
   { id: 'gray', name: '灰', hex: '#A0A0A0' },
@@ -185,6 +186,25 @@ export function countBySymbol(marks) {
  * はじめの色分け。保存してある色（記号→色）を優先し、ないものは上の行から順に色を配る。
  * 同じ名前の行は同じ色。斜線の行（使わない金物）は「塗らない」。
  */
+/**
+ * 現場で決めている色（名前で決める）。当てはまらないものは null（上の行から順に色を配る）。
+ *   金物：フックコーナー＝青、シナコーナー＝だいだい、オメガ15kN＝緑、オメガ20kN＝黄、ホールダウン Hi-28＝桃
+ *   壁：構造用面材（EXハイパー）＝水色、室内の耐力面材（ハイパーハード）＝濃い水色、片筋かい＝紫、たすき掛＝黄緑
+ */
+export function ruleColor(text = '') {
+  const t = text.normalize('NFKC').replace(/\s+/g, '');
+  if (/フック/.test(t)) return 'blue';
+  if (/シナ/.test(t)) return 'orange';
+  if (/オメガ.*15/.test(t)) return 'green';
+  if (/オメガ.*20/.test(t)) return 'yellow';
+  if (/(Hi|HD)-?28/i.test(t)) return 'pink';
+  if (/ハイパーハード/.test(t)) return 'deepsky';
+  if (/構造用面材|EXハイパー/.test(t)) return 'sky';
+  if (/片筋かい/.test(t)) return 'purple';
+  if (/たすき/.test(t)) return 'lime';
+  return null;
+}
+
 /** 同じ色にまとめる名前（半角・全角や空白の違いは同じとみなす）。名前のない行は記号ごと */
 export const colorGroup = (r) => (r.name ? 'n:' + r.name.normalize('NFKC').replace(/\s+/g, '') : 'k:' + (r.key ?? r.s));
 
@@ -192,7 +212,7 @@ export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id)
   const out = {};
   const keyOf = (r) => r.key ?? r.s;
   const byGroup = new Map(); // 同じ名前の金物（フックコーナー・シナコーナーなど）は同じ色
-  const used = new Set([...taken, ...rows.map((r) => saved[keyOf(r)]).filter(Boolean)]);
+  const used = new Set([...taken, ...rows.map((r) => saved[keyOf(r)]).filter(Boolean), ...rows.map((r) => ruleColor(r.name ?? r.label)).filter(Boolean)]);
   let k = 0;
   const next = () => {
     for (let n = 0; n < order.length; n++) {
@@ -205,22 +225,26 @@ export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id)
     const key = keyOf(r), grp = colorGroup(r);
     if (saved[key] && (saved[key] === NONE || colorHex(saved[key]))) out[key] = saved[key];
     else if (r.struck) out[key] = NONE;
-    else out[key] = byGroup.get(grp) ?? next();
+    else out[key] = ruleColor(r.name ?? r.label) ?? byGroup.get(grp) ?? next();
     if (!r.struck && out[key] !== NONE && !byGroup.has(grp)) byGroup.set(grp, out[key]);
   }
   return out;
 }
 
 /** 壁の記号のはじめの色の順番（金物とできるだけ違う色から使う） */
-export const WALL_ORDER = ['blue', 'pink', 'lime', 'brown', 'sky', 'orange', 'green', 'purple', 'yellow', 'red', 'gray'];
+export const WALL_ORDER = ['brown', 'pink', 'lime', 'blue', 'sky', 'orange', 'green', 'purple', 'yellow', 'red', 'gray'];
 
 /**
  * 塗るものの一覧（PDF の座標）。画面の下書き表示と PDF への書き込みの両方がこれを使う。
  * kind: 'mark'（図面の記号）/ 'legend'（リストの記号）/ 'band'（リストの行の帯）/ 'warn'（斜線の金物が図面にある＝赤い輪）
  */
-export function buildPaint(legend, marks, colors) {
+export function buildPaint(legend, marks, colors, { firstFloor = [] } = {}) {
   const out = [];
   const rowOf = new Map(legend.rows.map((r) => [r.s, r]));
+  const feet = omegaFeet(legend, marks, firstFloor);
+  // 1階のオメガの足元は Hi-28（ホールダウン）を入れるので、Hi-28 の色（なければ桃）
+  const hdRow = legend.rows.find((r) => ruleColor(r.name) === 'pink');
+  const footHex = colorHex(hdRow && colors[hdRow.s] !== NONE ? colors[hdRow.s] : 'pink') || colorHex('pink');
   for (const r of legend.rows) {
     const hex = colorHex(colors[r.s]);
     if (!hex) continue;
@@ -232,7 +256,7 @@ export function buildPaint(legend, marks, colors) {
   const R = (g) => g.size * MARK_SCALE;
   const groups = [];
   for (const g of marks) {
-    const hex = colorHex(colors[g.s]);
+    const hex = feet.has(g) ? footHex : colorHex(colors[g.s]);
     if (rowOf.get(g.s)?.struck) out.push({ kind: 'warn', page: g.page, hex: '#E0001B', cx: g.cx, cy: g.cy, r: R(g) + 1.6 });
     if (!hex) continue;
     const near = groups.find((k) => k.page === g.page && k.hex === hex && k.items.length < 2
@@ -244,6 +268,24 @@ export function buildPaint(legend, marks, colors) {
     const xs = k.items.map((g) => g.cx), ys = k.items.map((g) => g.cy);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
     out.push({ kind: 'mark', page: k.page, hex: k.hex, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: r + (x1 - x0) / 2, ry: r + (y1 - y0) / 2 });
+  }
+  return out;
+}
+
+/**
+ * 1階の柱伏図で、オメガコーナー（15kN・20kN）の足元（柱脚）の記号を返す。
+ * 柱の上下に並ぶ2つの記号（上＝柱頭、下＝柱脚）のうち、下側。
+ * @param firstFloor 1階の伏図のページ番号の配列
+ */
+export function omegaFeet(legend, marks, firstFloor = []) {
+  const omega = new Set(legend.rows.filter((r) => /オメガ/.test((r.name || '').normalize('NFKC'))).map((r) => r.s));
+  const pages = new Set(firstFloor);
+  const out = new Set();
+  for (const g of marks) {
+    if (!omega.has(g.s) || !pages.has(g.page)) continue;
+    // 同じ柱の上側の記号（真上、字の高さの 3 倍以内）があれば、g は足元
+    const above = marks.some((o) => o !== g && o.page === g.page && Math.abs(o.cx - g.cx) < g.size * 1.2 && o.cy > g.cy && o.cy - g.cy < g.size * 3);
+    if (above) out.add(g);
   }
   return out;
 }

@@ -132,5 +132,11 @@ export async function analyze(pdfjs, doc, onProgress = () => {}) {
     if (list && !kiso.list) kiso.list = list;
   }
   if (kiso && !kiso.legend && !kiso.marks.length && !kiso.list) kiso = null;
-  return { pages, legend, found, walls, kiso };
+  // 1階の伏図（「1階」と「伏図」が両方あるページ。基礎伏図は除く）：オメガの足元を桃にする
+  const firstFloor = [];
+  pages.forEach((p, i) => {
+    const t = p.glyphs.map((g) => g.s).join('').normalize('NFKC').replace(/\s+/g, '');
+    if (/1階.*伏図/.test(t) && !/基礎伏図/.test(t)) firstFloor.push(i);
+  });
+  return { pages, legend, found, walls, kiso, firstFloor };
 }

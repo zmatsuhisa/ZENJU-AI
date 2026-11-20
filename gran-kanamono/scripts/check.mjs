@@ -20,7 +20,7 @@ const doc = await pdfjs.getDocument({
   data: new Uint8Array(bytes), cMapUrl: join(root, 'node_modules/pdfjs-dist/cmaps/'), cMapPacked: true,
   standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/'), verbosity: 0,
 }).promise;
-const { legend, found, walls, kiso } = await analyze(pdfjs, doc);
+const { legend, found, walls, kiso, firstFloor } = await analyze(pdfjs, doc);
 if (!legend && !walls && !kiso) { console.log('金物リストも壁の表も見つかりません'); process.exit(2); }
 if (legend) {
   const cnt = countBySymbol(found.marks);
@@ -50,7 +50,7 @@ for (const m of walls?.marks || []) byPage[m.page + 1] = (byPage[m.page + 1] || 
 console.log('ページごと（金物/壁）', Object.fromEntries(Object.entries(byPage).map(([p, s]) => [p, `${(s.match(/k/g) || []).length}/${(s.match(/w/g) || []).length}`])));
 if (out) {
   const colors = { ...(legend ? defaultColors(legend.rows) : {}), ...(walls ? defaultColors(walls.legend.rows, {}, WALL_ORDER) : {}) };
-  const paint = [...(legend ? buildPaint(legend, found.marks, colors) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : []), ...(kiso ? buildKisoPaint(kiso, kisoColors, colorHex) : [])];
+  const paint = [...(legend ? buildPaint(legend, found.marks, colors, { firstFloor }) : []), ...(walls ? buildWallPaint(walls.legend, walls.marks, colors, colorHex) : []), ...(kiso ? buildKisoPaint(kiso, kisoColors, colorHex) : [])];
   writeFileSync(out, await paintPdf(PDFLib, bytes, paint));
   console.log('書き出し:', out);
 }

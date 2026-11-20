@@ -1,7 +1,7 @@
 // 金物着色の中心の処理のテスト（架空の図面データ。お客様の図面は使わない）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toGlyph, findLegend, findMarks, countBySymbol, defaultColors, buildPaint, NONE, PALETTE } from '../public/js/core.js';
+import { toGlyph, findLegend, findMarks, countBySymbol, defaultColors, buildPaint, NONE, PALETTE, ruleColor, omegaFeet, colorHex } from '../public/js/core.js';
 
 // pdf.js の文字1つと同じ形を作る
 const T = (str, x, y, size = 6, w = size * [...str].length) => toGlyph({ str, transform: [size, 0, 0, size, x, y], width: w });
@@ -122,4 +122,29 @@ test('表のすぐ左にある図面の字は表に入れない（色の帯を�
   const f = findMarks([{ glyphs: page }], lg);
   assert.equal(f.marks.filter((g) => g.x === 570).length, 0); // 「へ」はリストにないので塗らないが、表の字にもしない
   assert.equal(f.unknown.filter((g) => g.x === 570).length, 2);
+});
+
+test('現場で決めた色：フック青・シナだいだい・オメガ15緑・20黄・Hi-28桃、ハイパーハード濃い水色・EXハイパー水色', () => {
+  const rows = [{ s: 'ろ', name: 'フックコーナー' }, { s: 'に', name: 'ｼﾅｺｰﾅｰ' }, { s: 'と', name: 'ｵﾒｶﾞｺｰﾅｰ 15kN' },
+    { s: 'ち', name: 'ｵﾒｶﾞｺｰﾅｰ 20kN' }, { s: 'り', name: 'ﾋﾞｽ止めﾎｰﾙﾀﾞｳﾝ Hi-28' }, { s: 'ぬ', name: 'ﾋﾞｽ止めﾎｰﾙﾀﾞｳﾝ Hi-43' }];
+  const c = defaultColors(rows);
+  assert.deepEqual([c['ろ'], c['に'], c['と'], c['ち'], c['り']], ['blue', 'orange', 'green', 'yellow', 'pink']);
+  assert.ok(!['blue', 'orange', 'green', 'yellow', 'pink'].includes(c['ぬ'])); // 決まっていない金物は残りの色
+  assert.equal(ruleColor('面材 ﾀｲｶﾞｰﾊｲﾊﾟｰﾊｰﾄﾞT(入隅部)'), 'deepsky');
+  assert.equal(ruleColor('面材 構造用面材 ﾀｲｶﾞｰEXﾊｲﾊﾟｰ'), 'sky');
+  assert.equal(ruleColor('筋かい 45x90mm以上の木材 片筋かい'), 'purple');
+  assert.equal(ruleColor('筋かい たすき掛 筋かい'), 'lime');
+  assert.ok(colorHex('deepsky'));
+});
+
+test('1階の柱伏図：オメガの足元（柱の上下の記号の下側）は Hi-28 と同じ桃。2階や上側はそのまま', () => {
+  const legend = { rows: [{ s: 'ろ', name: 'フックコーナー' }, { s: 'と', name: 'ｵﾒｶﾞｺｰﾅｰ 15kN' }, { s: 'り', name: 'ﾎｰﾙﾀﾞｳﾝ Hi-28', struck: true }], page: 0, box: { x0: 500, x1: 600 }, rowH: 8 };
+  const m = (s, cx, cy, page) => ({ s, cx, cy, size: 4.4, page });
+  const marks = [m('と', 100, 205, 0), m('と', 100, 200, 0), m('と', 300, 205, 1), m('と', 300, 200, 1), m('ろ', 200, 205, 0), m('ろ', 200, 200, 0)];
+  const feet = omegaFeet(legend, marks, [0]);
+  assert.deepEqual([...feet], [marks[1]]); // 1階（ページ0）の下側の「と」だけ
+  const paint = buildPaint(legend, marks, defaultColors(legend.rows), { firstFloor: [0] }).filter((p) => p.kind === 'mark');
+  const pink = colorHex('pink'), green = colorHex('green');
+  assert.equal(paint.filter((p) => p.hex === pink).length, 1);
+  assert.ok(paint.some((p) => p.hex === green));
 });

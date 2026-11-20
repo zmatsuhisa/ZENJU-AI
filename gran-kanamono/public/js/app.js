@@ -13,7 +13,7 @@ const PDF_OPTS = {
   cMapUrl: new URL('../vendor/cmaps/', import.meta.url).href, cMapPacked: true,
   standardFontDataUrl: new URL('../vendor/standard_fonts/', import.meta.url).href,
 };
-const STORE = 'gran-kanamono.colors.v2'; // v2：同じ名前の金物を1色にまとめた（前の色分けは使わない）
+const STORE = 'gran-kanamono.colors.v3'; // v3：現場で決めた色（フック青・シナだいだい・オメガ15緑・20黄・Hi-28桃・ハイパーハード濃い水色）
 const PLAN_SCALE = 2.2; // 図面の下書き表示の細かさ（拡大しても記号が読める程度）
 
 const $ = (id) => document.getElementById(id);
@@ -74,13 +74,13 @@ async function openFile(file) {
     st.doc?.destroy();
     // pdf.js は渡したデータを手放すことがあるので、写しを渡す（保存のときに元のデータを使う）
     st.doc = await pdfjs.getDocument({ ...PDF_OPTS, data: st.bytes.slice() }).promise;
-    const { legend, found, walls, kiso } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
+    const { legend, found, walls, kiso, firstFloor } = await analyze(pdfjs, st.doc, (n, all) => fileMsg(`「${file.name}」を読んでいます…（${n} / ${all} ページ）`));
     if (!legend && !walls && !kiso) {
       fileMsg(`「${file.name}」から「金物リスト」や「軸組みの種類と壁倍率」の表が見つかりませんでした。構造図（金物図）を選んでください。文字や線が画像になっているPDF（スキャンなど）は、今は読めません。`, 'error');
       status('表なし', true);
       return;
     }
-    st.legend = legend; st.found = found; st.walls = walls; st.kiso = kiso;
+    st.legend = legend; st.found = found; st.walls = walls; st.kiso = kiso; st.firstFloor = firstFloor || [];
     st.colors = initialColors(loadSaved());
     st.open = null;
     drop.classList.add('has');
@@ -159,7 +159,7 @@ function drawView(view, paint) {
 
 function currentPaint() {
   const out = [];
-  if (st.legend) out.push(...buildPaint(st.legend, st.found.marks, st.colors));
+  if (st.legend) out.push(...buildPaint(st.legend, st.found.marks, st.colors, { firstFloor: st.firstFloor }));
   if (st.walls) out.push(...buildWallPaint(st.walls.legend, st.walls.marks, st.colors, colorHex));
   if (st.kiso) out.push(...buildKisoPaint(st.kiso, st.colors, colorHex));
   return out;
