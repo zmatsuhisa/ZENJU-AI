@@ -1,0 +1,16 @@
+{
+  "name": "gran-kanamono",
+  "version": "0.1.0",
+  "private": true,
+  "description": "グランOS 金物着色：構造図（金物図）の金物記号を、金物リストの色分けどおりに自動で塗る",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test test/*.test.js",
+    "postinstall": "node server/copy-vendor.js"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38"
+  }
+}

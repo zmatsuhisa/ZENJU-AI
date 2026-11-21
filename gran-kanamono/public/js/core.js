@@ -1,0 +1,371 @@
+// 金物着色の中心になる処理（画面・pdf.js・pdf-lib に依存しない。テストしやすいように純粋な関数だけ）
+//
+// 座標はすべて PDF の座標（左下が原点・単位はポイント）。
+// 文字は pdf.js の getTextContent() が返す { str, transform, width } をそのまま受け取る。
+
+/** 色の候補。蛍光ペンに近い、重ねて黒い線が読める色 */
+export const PALETTE = [
+  { id: 'yellow', name: '黄', hex: '#FFE100' },
+  { id: 'sky', name: '水色', hex: '#3CC8F4' },
+  { id: 'green', name: '緑', hex: '#46CF5C' },
+  { id: 'orange', name: 'だいだい', hex: '#FF9822' },
+  { id: 'purple', name: '紫', hex: '#B67CF0' },
+  { id: 'red', name: '赤', hex: '#F4475B' },
+  { id: 'pink', name: '桃', hex: '#FF86CF' },
+  { id: 'blue', name: '青', hex: '#4D7BFF' },
+  { id: 'deepsky', name: '濃い水色', hex: '#0A8FD8' },
+  { id: 'lime', name: '黄緑', hex: '#B9E62A' },
+  { id: 'brown', name: '茶', hex: '#C08A52' },
+  { id: 'gray', name: '灰', hex: '#A0A0A0' },
+];
+export const NONE = 'none';
+export const colorHex = (id) => PALETTE.find((p) => p.id === id)?.hex || null;
+
+// 記号として扱う字：ひらがな・カタカナ・英数字の1〜2字（「-」は「金物なし」なので除く）
+const SYMBOL_RE = /^[ぁ-ゖァ-ヺA-Za-z0-9]{1,2}$/;
+const NUM_RE = /^-?\d+(\.\d+)?$/;
+const TITLE_RE = /(柱脚柱頭|柱頭柱脚|接合)?金物(リスト|一覧|表)/;
+
+/**
+ * pdf.js の文字1つ（1行分のこともある）を、扱いやすい形にする。
+ * cx, cy は字の中心。size は字の高さ。
+ */
+export function toGlyph(item, page = 0) {
+  const [a, b, c, d, e, f] = item.transform;
+  const sx = Math.hypot(a, b) || 1;
+  const size = Math.hypot(c, d);
+  const wEm = (item.width || 0) / sx; // 字の幅（字の大きさを1としたとき）
+  // 字の中心：横は幅の半分、縦は下の線から字の高さの 0.38（和文の書体はおよそ -0.12〜0.88）
+  const u = wEm / 2, v = 0.38;
+  return {
+    s: String(item.str).trim(), page, size,
+    x: e, y: f, w: item.width || 0, m: item.transform,
+    cx: e + a * u + c * v, cy: f + b * u + d * v,
+  };
+}
+
+const median = (xs) => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((p, q) => p - q);
+  return s[Math.floor(s.length / 2)];
+};
+
+/**
+ * 金物リスト（柱脚柱頭金物リスト）を探して読む。
+ * @param glyphs 1ページ分の toGlyph の結果
+ * @param segs そのページの線分 [[x0,y0,x1,y1], ...]（斜線＝使わない金物の見分けに使う。なくてもよい）
+ * @returns { title, rows: [{ s, name, kn, cx, cy, struck }], box: {x0,y0,x1,y1}, rowH } または null
+ */
+export function findLegend(glyphs, segs = []) {
+  const titles = glyphs.filter((g) => TITLE_RE.test(g.s));
+  for (const title of titles.sort((p, q) => score(q) - score(p))) {
+    const legend = readLegendUnder(title, glyphs, segs);
+    if (legend) return legend;
+  }
+  return null;
+  function score(g) { return (/柱脚柱頭|柱頭柱脚/.test(g.s) ? 2 : 0) + (/リスト/.test(g.s) ? 1 : 0); }
+}
+
+function readLegendUnder(title, glyphs, segs) {
+  // 見出しのすぐ下にある「記号」の列
+  const heads = glyphs.filter((g) => g.s === '記号' && g.y < title.y && title.y - g.y < 120 && Math.abs(g.x - title.x) < 260);
+  if (!heads.length) return null;
+  const head = heads.sort((p, q) => (title.y - p.y) - (title.y - q.y))[0];
+  // 表の下の終わり：見出しより下にある「●」「※」で始まる字のうち、いちばん上のもの
+  // 行の中の注記（名称の欄の「※床板上は…」など。記号の列より右から始まる）は表の終わりにしない
+  const enders = glyphs.filter((g) => /^[●※]/.test(g.s) && g.y < head.y - 4 && Math.abs(g.x - title.x) < 260 && g.x < head.x);
+  const limitY = enders.length ? Math.max(...enders.map((g) => g.y)) : -Infinity;
+  const colL = head.x - 6, colR = head.x + head.w + 6;
+  const syms = glyphs
+    .filter((g) => g.cy < head.y - 2 && g.cy > limitY && g.cx >= colL && g.cx <= colR && (SYMBOL_RE.test(g.s) || g.s === '-' || g.s === '－'))
+    .sort((p, q) => q.cy - p.cy);
+  if (syms.length < 2) return null;
+  // 行の間隔。間があきすぎたところで表が終わったとみなす
+  const gaps = syms.slice(1).map((g, i) => syms[i].cy - g.cy);
+  const rowH = median(gaps);
+  const rowsG = [syms[0]];
+  for (let i = 1; i < syms.length; i++) {
+    if (syms[i - 1].cy - syms[i].cy > rowH * 2.5) break;
+    rowsG.push(syms[i]);
+  }
+  const rows = [];
+  let x1 = head.x + head.w, x0 = Math.min(head.x, title.x);
+  // 表の左右の端：左は見出し（●柱脚柱頭金物リスト）の左端、右は見出し行の字（番号・記号・名称・引張・せん断）の右端。
+  // これより外の字は、同じ高さにあっても図面の字なので表に入れない
+  const headRow = glyphs.filter((o) => o.cy < title.cy - 2 && o.cy > head.cy - rowH * 0.5 && o.x >= title.x - 12 && o.x < title.x + 400);
+  const tableL = Math.min(title.x, head.x) - 12;
+  const tableR = Math.max(head.x + head.w, ...headRow.map((o) => o.x + o.w)) + 12;
+  for (const g of rowsG) {
+    const same = glyphs.filter((o) => o !== g && Math.abs(o.cy - g.cy) < rowH * 0.42 && o.cy > limitY && o.x >= tableL && o.x + o.w <= tableR);
+    // 表の中の字だけ：記号から左右へ、間が大きくあく（＝表の外の図面に出る）までの字
+    const reach = Math.max(rowH * 4, 70);
+    const right = chain(same.filter((o) => o.x > g.x + g.w - 1).sort((p, q) => p.x - q.x), g.x + g.w, reach, 1);
+    const left = chain(same.filter((o) => o.x + o.w < g.x + 1).sort((p, q) => q.x - p.x), g.x, reach, -1);
+    for (const o of [...right, ...left]) { x1 = Math.max(x1, o.x + o.w); x0 = Math.min(x0, o.x); }
+    // 名称の欄の注記（※床板上は… ※1階柱脚は…）は名前と分けておく
+    const words = right.filter((o) => !NUM_RE.test(o.s) && o.s !== '-');
+    const main = [...new Set(words.filter((o) => !/^※/.test(o.s)).map((o) => o.s))];
+    const notes = [...new Set(words.filter((o) => /^※/.test(o.s)).map((o) => o.s))];
+    const name = (main.length ? main : notes).join(' ').trim();
+    const knG = right.find((o) => NUM_RE.test(o.s));
+    if (g.s === '-' || g.s === '－') continue; // 金物を使わない行（短ほぞ差し など）
+    rows.push({ s: g.s, name, notes, kn: knG ? Number(knG.s) : null, cx: g.cx, cy: g.cy, no: left.find((o) => NUM_RE.test(o.s))?.s || '' });
+  }
+  if (!rows.length) return null;
+  const last = rowsG[rowsG.length - 1];
+  const box = { x0: x0 - 4, x1: x1 + 4, y0: last.cy - rowH * 0.6, y1: title.y + title.size + 2 };
+  // 斜線（行の左下から右上へ引いた線）がある行は「使わない金物」
+  for (const r of rows) {
+    r.struck = segs.some(([sx0, sy0, sx1, sy1]) => {
+      const dx = Math.abs(sx1 - sx0), dy = Math.abs(sy1 - sy0);
+      if (dx < (box.x1 - box.x0) * 0.3 || dy < rowH * 0.3 || dy > rowH * 1.6) return false;
+      if (Math.min(sx0, sx1) < box.x0 - 8 || Math.max(sx0, sx1) > box.x1 + 8) return false;
+      return Math.min(sy0, sy1) < r.cy && Math.max(sy0, sy1) > r.cy;
+    });
+  }
+  // 同じ記号が2回出てきたら最初の行だけ使う
+  const seen = new Set();
+  const uniq = rows.filter((r) => (seen.has(r.s) ? false : (seen.add(r.s), true)));
+  return { title: title.s, page: title.page, rows: uniq, box, rowH };
+}
+
+/** 並べた字を、間が reach より大きくあくところまでつないで返す（dir=1 右へ / -1 左へ） */
+function chain(sorted, from, reach, dir) {
+  const out = [];
+  let edge = from;
+  for (const o of sorted) {
+    const gap = dir > 0 ? o.x - edge : edge - (o.x + o.w);
+    if (gap > reach) break;
+    out.push(o);
+    edge = dir > 0 ? Math.max(edge, o.x + o.w) : Math.min(edge, o.x);
+  }
+  return out;
+}
+
+const inBox = (g, b) => g.cx >= b.x0 && g.cx <= b.x1 && g.cy >= b.y0 && g.cy <= b.y1;
+const roundSize = (s) => Math.round(s * 10) / 10;
+
+/**
+ * 図面全体から、リストと同じ記号を探す。
+ * 通り芯の丸文字や表の中の字を塗らないように、「いちばん多く使われている字の大きさ」のものだけを金物記号とみなす。
+ * @param pages [{ glyphs }]（ページ順）
+ * @param legend findLegend の結果
+ * @returns { marks, size, otherSize: 大きさが違うので塗らなかった字の数, unknown: リストにない記号 }
+ */
+export function findMarks(pages, legend, { tolerance = 0.12, exclude = {} } = {}) {
+  const outside = (g, i) => !(exclude[i] || []).some((z) => inBox(g, z));
+  const symbols = new Set(legend.rows.map((r) => r.s));
+  const cands = [];
+  pages.forEach((p, i) => {
+    for (const g of p.glyphs) {
+      if (!symbols.has(g.s)) continue;
+      if (i === legend.page && inBox(g, legend.box)) continue;
+      if (!outside(g, i)) continue;
+      cands.push(g);
+    }
+  });
+  if (!cands.length) return { marks: [], size: 0, otherSize: 0, unknown: [] };
+  const hist = new Map();
+  for (const g of cands) hist.set(roundSize(g.size), (hist.get(roundSize(g.size)) || 0) + 1);
+  const size = [...hist.entries()].sort((p, q) => q[1] - p[1] || p[0] - q[0])[0][0];
+  const okSize = (g) => Math.abs(g.size - size) <= size * tolerance;
+  // 通り芯の名前（い・ろ・は…が横一列に並ぶ）は金物の記号ではない。同じ高さに 6 字以上、ほとんど別の字が並ぶ列を除く
+  const gridLabel = new Set();
+  pages.forEach((p) => {
+    const rowsY = new Map();
+    for (const g of p.glyphs) {
+      if (!/^[ぁ-ゖ]$/.test(g.s) || !okSize(g)) continue;
+      const k = Math.round(g.cy / 2);
+      for (const kk of [k - 1, k, k + 1]) (rowsY.get(kk) || rowsY.set(kk, []).get(kk)).push(g);
+    }
+    for (const row of rowsY.values()) {
+      const near = row.filter((g) => Math.abs(g.cy - row[0].cy) < 1.5);
+      if (near.length >= 6 && new Set(near.map((g) => g.s)).size >= near.length * 0.8) for (const g of near) gridLabel.add(g);
+    }
+  });
+  const ok = (g) => okSize(g) && !gridLabel.has(g);
+  const marks = cands.filter(ok);
+  // 同じ大きさの1〜2字の記号で、リストにないもの（書き間違い・リストの載せ忘れの確認用）
+  const unknown = [];
+  pages.forEach((p, i) => {
+    for (const g of p.glyphs) {
+      if (symbols.has(g.s) || !/^[ぁ-ゖ]$/.test(g.s) || !ok(g)) continue;
+      if (i === legend.page && inBox(g, legend.box)) continue;
+      if (!outside(g, i)) continue;
+      unknown.push(g);
+    }
+  });
+  return { marks, size, otherSize: cands.filter((g) => !okSize(g)).length, gridLabels: gridLabel.size, unknown };
+}
+
+/** 記号ごとの数 */
+export function countBySymbol(marks) {
+  const m = new Map();
+  for (const g of marks) m.set(g.s, (m.get(g.s) || 0) + 1);
+  return m;
+}
+
+/**
+ * はじめの色分け。保存してある色（記号→色）を優先し、ないものは上の行から順に色を配る。
+ * 同じ名前の行は同じ色。斜線の行（使わない金物）は「塗らない」。
+ */
+/**
+ * 現場で決めている色（名前で決める）。当てはまらないものは null（上の行から順に色を配る）。
+ *   金物：フックコーナー＝青、シナコーナー＝だいだい、オメガ15kN＝緑、オメガ20kN＝黄、ホールダウン Hi-28＝桃
+ *   壁：構造用面材（EXハイパー）＝水色、室内の耐力面材（ハイパーハード）＝濃い水色、片筋かい＝紫、たすき掛＝黄緑
+ */
+export function ruleColor(text = '') {
+  const t = text.normalize('NFKC').replace(/\s+/g, '');
+  if (/フック/.test(t)) return 'blue';
+  if (/シナ/.test(t)) return 'orange';
+  if (/オメガ.*15/.test(t)) return 'green';
+  if (/オメガ.*20/.test(t)) return 'yellow';
+  if (/(Hi|HD)-?28/i.test(t)) return 'pink';
+  if (/ハイパーハード/.test(t)) return 'deepsky';
+  if (/構造用面材|EXハイパー/.test(t)) return 'sky';
+  if (/片筋かい/.test(t)) return 'purple';
+  if (/たすき/.test(t)) return 'lime';
+  return null;
+}
+
+/** 同じ色にまとめる名前（半角・全角や空白の違いは同じとみなす）。名前のない行は記号ごと */
+export const colorGroup = (r) => (r.name ? 'n:' + r.name.normalize('NFKC').replace(/\s+/g, '') : 'k:' + (r.key ?? r.s));
+
+export function defaultColors(rows, saved = {}, order = PALETTE.map((p) => p.id), taken = []) {
+  const out = {};
+  const keyOf = (r) => r.key ?? r.s;
+  const byGroup = new Map(); // 同じ名前の金物（フックコーナー・シナコーナーなど）は同じ色
+  const used = new Set([...taken, ...rows.map((r) => saved[keyOf(r)]).filter(Boolean), ...rows.map((r) => ruleColor(r.name ?? r.label)).filter(Boolean)]);
+  let k = 0;
+  const next = () => {
+    for (let n = 0; n < order.length; n++) {
+      const id = order[(k + n) % order.length];
+      if (!used.has(id)) { k = (k + n + 1) % order.length; used.add(id); return id; }
+    }
+    return order[k++ % order.length];
+  };
+  for (const r of rows) {
+    const key = keyOf(r), grp = colorGroup(r);
+    if (saved[key] && (saved[key] === NONE || colorHex(saved[key]))) out[key] = saved[key];
+    else if (r.struck) out[key] = NONE;
+    else out[key] = ruleColor(r.name ?? r.label) ?? byGroup.get(grp) ?? next();
+    if (!r.struck && out[key] !== NONE && !byGroup.has(grp)) byGroup.set(grp, out[key]);
+  }
+  return out;
+}
+
+/** 壁の記号のはじめの色の順番（金物とできるだけ違う色から使う） */
+export const WALL_ORDER = ['brown', 'pink', 'lime', 'blue', 'sky', 'orange', 'green', 'purple', 'yellow', 'red', 'gray'];
+
+/**
+ * 塗るものの一覧（PDF の座標）。画面の下書き表示と PDF への書き込みの両方がこれを使う。
+ * kind: 'mark'（図面の記号）/ 'legend'（リストの記号）/ 'band'（リストの行の帯）/ 'warn'（斜線の金物が図面にある＝赤い輪）
+ */
+export function buildPaint(legend, marks, colors, { firstFloor = [] } = {}) {
+  const out = [];
+  const rowOf = new Map(legend.rows.map((r) => [r.s, r]));
+  const feet = omegaFeet(legend, marks, firstFloor);
+  // 1階のオメガの足元は Hi-28（ホールダウン）を入れるので、Hi-28 の色（なければ桃）
+  const hdRow = legend.rows.find((r) => ruleColor(r.name) === 'pink');
+  const footHex = colorHex(hdRow && colors[hdRow.s] !== NONE ? colors[hdRow.s] : 'pink') || colorHex('pink');
+  for (const r of legend.rows) {
+    const hex = colorHex(colors[r.s]);
+    if (!hex) continue;
+    out.push({ kind: 'band', page: legend.page, hex, x0: legend.box.x0 + 1, x1: legend.box.x1 - 1, y0: r.cy - legend.rowH / 2 + 0.8, y1: r.cy + legend.rowH / 2 - 0.8 });
+    out.push({ kind: 'legend', page: legend.page, hex, cx: r.cx, cy: r.cy, r: legend.rowH * 0.44 });
+  }
+  // 記号の丸（ひとまわり大きく）。同じ色の記号が近くに並ぶとき（柱の上下など）は、重なって色が濃くならないように
+  // 1つの楕円にまとめる
+  const R = (g) => g.size * MARK_SCALE;
+  const groups = [];
+  for (const g of marks) {
+    const hex = feet.has(g) ? footHex : colorHex(colors[g.s]);
+    if (rowOf.get(g.s)?.struck) out.push({ kind: 'warn', page: g.page, hex: '#E0001B', cx: g.cx, cy: g.cy, r: R(g) + 1.6 });
+    if (!hex) continue;
+    const near = groups.find((k) => k.page === g.page && k.hex === hex && k.items.length < 2
+      && Math.hypot(k.items[0].cx - g.cx, k.items[0].cy - g.cy) < R(g) * 2);
+    if (near) near.items.push(g); else groups.push({ page: g.page, s: g.s, hex, items: [g] });
+  }
+  for (const k of groups) {
+    const r = R(k.items[0]);
+    const xs = k.items.map((g) => g.cx), ys = k.items.map((g) => g.cy);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    out.push({ kind: 'mark', page: k.page, hex: k.hex, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: r + (x1 - x0) / 2, ry: r + (y1 - y0) / 2 });
+  }
+  return out;
+}
+
+/**
+ * 1階の柱伏図で、オメガコーナー（15kN・20kN）の足元（柱脚）の記号を返す。
+ * 柱の上下に並ぶ2つの記号（上＝柱頭、下＝柱脚）のうち、下側。
+ * @param firstFloor 1階の伏図のページ番号の配列
+ */
+export function omegaFeet(legend, marks, firstFloor = []) {
+  const omega = new Set(legend.rows.filter((r) => /オメガ/.test((r.name || '').normalize('NFKC'))).map((r) => r.s));
+  const pages = new Set(firstFloor);
+  const out = new Set();
+  for (const g of marks) {
+    if (!omega.has(g.s) || !pages.has(g.page)) continue;
+    // 同じ柱の上側の記号（真上、字の高さの 3 倍以内）があれば、g は足元
+    const above = marks.some((o) => o !== g && o.page === g.page && Math.abs(o.cx - g.cx) < g.size * 1.2 && o.cy > g.cy && o.cy - g.cy < g.size * 3);
+    if (above) out.add(g);
+  }
+  return out;
+}
+
+/** 記号の丸の大きさ（字の大きさの何倍か） */
+export const MARK_SCALE = 1.4;
+
+/** 塗りの強さ（画面と PDF で同じ見え方にする） */
+export const ALPHA = { band: 0.3, outer: 0.55, outline: 0.55, legend: 0.75, mark: 0.7, warn: 1, ring: 1, dim: 1, label: 1 };
+
+/**
+ * ページを「正しい向き」で見たときの座標（左下が原点・y が上向き）への変換。
+ * 図面を横向きに置いて /Rotate 90 で回して見せている PDF でも、字や線を正しい向きで読めるようにする。
+ * pdf.js の PageViewport（scale 1）と同じ計算をして、上下を反転する。
+ * @param rotate ページの回転（0・90・180・270） @param view [x0, y0, x1, y1]（ページの範囲）
+ * @returns [a, b, c, d, e, f]（PDF の座標 → 正しい向きの座標）
+ */
+export function uprightMatrix(rotate = 0, view = [0, 0, 0, 0]) {
+  const r = ((rotate % 360) + 360) % 360;
+  const [x0, y0, x1, y1] = view;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const [A, B, C, D] = r === 90 ? [0, 1, 1, 0] : r === 180 ? [-1, 0, 0, 1] : r === 270 ? [0, -1, -1, 0] : [1, 0, 0, -1];
+  const side = r === 90 || r === 270;
+  const W = side ? y1 - y0 : x1 - x0, H = side ? x1 - x0 : y1 - y0;
+  const t = [A, B, C, D, W / 2 - A * cx - C * cy, H / 2 - B * cx - D * cy]; // 画面の向き（y が下向き）
+  return [t[0], -t[1], t[2], -t[3], t[4], H - t[5]];
+}
+
+/** 変換の掛け算（m の後に n） */
+export const mulMatrix = (n, m) => [n[0] * m[0] + n[2] * m[1], n[1] * m[0] + n[3] * m[1], n[0] * m[2] + n[2] * m[3], n[1] * m[2] + n[3] * m[3], n[0] * m[4] + n[2] * m[5] + n[4], n[1] * m[4] + n[3] * m[5] + n[5]];
+
+/** 逆の変換 */
+export function invMatrix([a, b, c, d, e, f]) {
+  const det = a * d - b * c;
+  return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
+}
+
+export const applyMatrix = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+
+/**
+ * 同じ表（金物リスト・壁の表）がほかのページにも書いてあるとき、その範囲を返す（表の中の字を図面の記号として数えない）。
+ * 見出しの字（表の title）を各ページで探し、見つけた表と同じ位置関係の箱にする。
+ * @returns { ページ番号: [{ x0, x1, y0, y1 }] }
+ */
+export function tableCopies(pages, table) {
+  const out = {};
+  if (!table) return out;
+  const own = (pages[table.page]?.glyphs || []).filter((g) => g.s === table.title)
+    .sort((p, q) => Math.hypot(p.cx - table.box.x0, p.cy - table.box.y1) - Math.hypot(q.cx - table.box.x0, q.cy - table.box.y1))[0];
+  if (!own) return out;
+  pages.forEach((p, i) => {
+    if (i === table.page) return;
+    for (const g of p.glyphs) {
+      if (g.s !== table.title) continue;
+      const dx = g.x - own.x, dy = g.y - own.y;
+      (out[i] ??= []).push({ x0: table.box.x0 + dx - 2, x1: table.box.x1 + dx + 2, y0: table.box.y0 + dy - 2, y1: table.box.y1 + dy + 2 });
+    }
+  });
+  return out;
+}

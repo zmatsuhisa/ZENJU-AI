@@ -1,0 +1,184 @@
+// pdf.js で PDF を読む（ブラウザでも Node でも同じに動く。pdf.js は呼ぶ側が渡す）
+import { toGlyph, findLegend, findMarks, uprightMatrix, mulMatrix, tableCopies } from './core.js';
+import { findWallLegend, findWallMarks, excludeZones, findCodeWallMarks } from './walls.js';
+import { mergeWords, findKisoLegend, findKisoMarks, findKisoList, findOuterBand, gridLines, wallsOnGrid, findSpans, gridMm, mmPerPt } from './kiso.js';
+import { dropDashes } from './walls.js';
+import { floorPages, gridLabels, fitAxis, upperWalls } from './upper.js';
+
+/** ページごとの文字（toGlyph の形） */
+export async function readGlyphs(doc) {
+  const pages = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n);
+    const tc = await page.getTextContent();
+    // 横向きに置いて回して見せているページも、正しい向きの座標で読む
+    const M = uprightMatrix(page.rotate, page.view);
+    const glyphs = [];
+    const seen = new Map();
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      // 太字に見せるため同じ字を少しずつずらして何回も書いた図面がある。同じ字・ほぼ同じ位置は1つにする
+      const g = toGlyph({ ...it, transform: mulMatrix(M, it.transform) }, n - 1);
+      const k = `${g.s}|${Math.round(g.cx / 3)}|${Math.round(g.cy / 3)}`;
+      const near = [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => `${g.s}|${Math.round(g.cx / 3) + dx}|${Math.round(g.cy / 3) + dy}`));
+      if (near.some((q) => (seen.get(q) || []).some((o) => Math.hypot(o.cx - g.cx, o.cy - g.cy) < 1.5))) continue;
+      (seen.get(k) || seen.set(k, []).get(k)).push(g);
+      glyphs.push(g);
+    }
+    pages.push({ glyphs });
+  }
+  return pages;
+}
+
+/**
+ * ページの線分を PDF の座標で取り出す（斜線の見分けに使う）。
+ * pdf.js 4.x の operator list を読み、座標変換（cm・q/Q・フォーム）をたどる。
+ */
+export async function readSegments(pdfjs, page, box = null) {
+  const { OPS } = pdfjs;
+  const ol = await page.getOperatorList();
+  const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+  // 正しい向きの座標で返す（横向きに置いて回して見せているページ）
+  const M0 = uprightMatrix(page.rotate, page.view);
+  let m = M0;
+  const stack = [];
+  const ap = (x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  const segs = [];
+  const keep = (s) => !box || (Math.max(s[0], s[2]) >= box.x0 - 10 && Math.min(s[0], s[2]) <= box.x1 + 10 && Math.max(s[1], s[3]) >= box.y0 - 10 && Math.min(s[1], s[3]) <= box.y1 + 10);
+  for (let i = 0; i < ol.fnArray.length; i++) {
+    const fn = ol.fnArray[i], args = ol.argsArray[i];
+    if (fn === OPS.save) stack.push(m);
+    else if (fn === OPS.restore) m = stack.pop() || M0;
+    else if (fn === OPS.transform) m = mul(m, args);
+    else if (fn === OPS.paintFormXObjectBegin) { stack.push(m); if (Array.isArray(args?.[0]) && args[0].length === 6) m = mul(m, args[0]); }
+    else if (fn === OPS.paintFormXObjectEnd) m = stack.pop() || M0;
+    else if (fn === OPS.constructPath) {
+      const [ops, nums] = args;
+      let k = 0, cur = null, start = null;
+      const line = (p) => { if (cur) { const s = [...cur, ...p]; if (keep(s)) segs.push(s); } cur = p; };
+      // 曲線は短い線に分ける（円や弧の形を比べられるように）
+      const bez = (p1, p2, p3) => {
+        const p0 = cur || p3;
+        for (let i = 1; i <= 6; i++) {
+          const t = i / 6, u = 1 - t;
+          line([u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+            u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]);
+        }
+      };
+      for (const o of ops) {
+        if (o === OPS.moveTo) { cur = start = ap(nums[k], nums[k + 1]); k += 2; }
+        else if (o === OPS.lineTo) { line(ap(nums[k], nums[k + 1])); k += 2; }
+        else if (o === OPS.curveTo) { bez(ap(nums[k], nums[k + 1]), ap(nums[k + 2], nums[k + 3]), ap(nums[k + 4], nums[k + 5])); k += 6; }
+        else if (o === OPS.curveTo2) { bez(cur || ap(nums[k], nums[k + 1]), ap(nums[k], nums[k + 1]), ap(nums[k + 2], nums[k + 3])); k += 4; }
+        else if (o === OPS.curveTo3) { const p3 = ap(nums[k + 2], nums[k + 3]); bez(ap(nums[k], nums[k + 1]), p3, p3); k += 4; }
+        else if (o === OPS.rectangle) {
+          const [x, y, w, h] = nums.slice(k, k + 4); k += 4;
+          cur = start = ap(x, y);
+          line(ap(x + w, y)); line(ap(x + w, y + h)); line(ap(x, y + h)); line(start);
+        }
+        else if (o === OPS.closePath) { if (cur && start) line(start); cur = start; }
+      }
+    }
+  }
+  return segs;
+}
+
+/**
+ * PDF を読んで、金物リスト・金物記号・壁の表・壁の記号までまとめて返す。
+ * @returns { pages, legend, found, walls: { legend, marks } | null, kiso: { legend, marks, list, planPages } | null }
+ */
+export async function analyze(pdfjs, doc, onProgress = () => {}) {
+  const pages = await readGlyphs(doc);
+  const segs = [];
+  const sizes = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    onProgress(n, doc.numPages);
+    const page = await doc.getPage(n);
+    const [x0, y0, x1, y1] = page.view;
+    const side = page.rotate % 180 !== 0;
+    sizes.push({ w: side ? y1 - y0 : x1 - x0, h: side ? x1 - x0 : y1 - y0 });
+    segs.push(await readSegments(pdfjs, page));
+  }
+  let legend = null;
+  for (let i = 0; i < pages.length && !legend; i++) {
+    if (findLegend(pages[i].glyphs)) legend = findLegend(pages[i].glyphs, segs[i]);
+  }
+  let wallLegend = null;
+  for (let i = 0; i < pages.length && !wallLegend; i++) wallLegend = findWallLegend(pages[i].glyphs, segs[i], i);
+  // ほかのページに同じ表が書いてあれば（2階の柱伏図にも金物リスト・壁の表がある）、その中は探さない
+  const copies = {};
+  for (const t of [legend, wallLegend]) for (const [k, v] of Object.entries(tableCopies(pages, t))) (copies[k] ??= []).push(...v);
+  const found = legend ? findMarks(pages, legend, { exclude: copies }) : null;
+  // 壁の記号は伏図（平面）にしか出てこない。「伏図」とあるページだけで探す（詳細図の溶接の三角などを拾わないように）。
+  // どのページにも当てはまらなければ全ページで探す
+  // 基礎伏図には壁の記号も描かれているが、現場では塗らないので除く（柱伏図などで探す）
+  const planPages = pages.map((p) => {
+    const t = p.glyphs.map((g) => g.s.replace(/\s+/g, '')).join(' ');
+    return /伏図/.test(t) && !/基礎伏図/.test(t);
+  });
+  const usePage = (i) => !planPages.some(Boolean) || planPages[i];
+  const exclude = wallLegend ? excludeZones(pages.map((p) => p.glyphs), [wallLegend, legend], sizes) : {};
+  for (const [k, v] of Object.entries(copies)) (exclude[k] ??= []).push(...v);
+  const walls = wallLegend ? {
+    legend: wallLegend,
+    marks: wallLegend.rows.some((r) => r.code)
+      // 番号で書く壁（6-1・12-1 など）：図面の字で探す
+      ? findCodeWallMarks(pages.map((p, i) => ({ glyphs: usePage(i) ? p.glyphs : [] })), wallLegend, { exclude })
+      : findWallMarks(segs.map((s, i) => ({ segs: usePage(i) ? s : [] })), wallLegend, { exclude }),
+  } : null;
+  // 基礎図面：基礎伏図（「基礎伏図」とあるページ）の凡例と記号、基礎リスト（断面の一覧）
+  let kiso = null;
+  for (let i = 0; i < pages.length; i++) {
+    const words = mergeWords(pages[i].glyphs);
+    const isPlan = words.some((w) => /基礎伏図/.test(w.s.replace(/\s+/g, '')));
+    const list = findKisoList(words, segs[i], i);
+    if (!isPlan && !list) continue;
+    kiso ??= { legend: null, marks: [], list: null, planPages: [] };
+    if (isPlan) {
+      const lg = findKisoLegend(pages[i].glyphs, segs[i], i);
+      if (lg && !kiso.legend) kiso.legend = lg;
+      const ex = excludeZones([pages[i].glyphs], [], [sizes[i]])[0] || [];
+      const pm = findKisoMarks(words, lg, ex);
+      kiso.marks.push(...pm);
+      kiso.planPages.push(i);
+      // 外周の基礎：図面の記号（人通口・梁符号など）を囲む建物の外まわりの壁に沿った帯
+      const solid = dropDashes(segs[i]);
+      const solidSet = new Set(solid);
+      const grid = gridLines(segs[i].filter((x) => !solidSet.has(x)));
+      const ol = findOuterBand(solid, pm.filter((m) => m.kind !== 'dok').map((m) => [m.cx, m.cy]), { grid });
+      if (ol) (kiso.outer ??= []).push({ page: i, thick: 6, ...ol });
+      // 空きスパン：外周の中の立上り（通り芯の上の壁）と立上りの間の寸法
+      if (ol) {
+        const xs = ol.corners.map((p) => p[0]), ys = ol.corners.map((p) => p[1]);
+        const box = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+        const mp = mmPerPt(words);
+        if (mp) {
+          const sp = findSpans(wallsOnGrid(solid, grid, box), mp, { pos: gridMm(grid, words, mp) });
+          (kiso.spans ??= []).push(...sp.map((x) => ({ page: i, ...x })));
+        }
+      }
+    }
+    if (list && !kiso.list) kiso.list = list;
+  }
+  if (kiso && !kiso.legend && !kiso.marks.length && !kiso.list) kiso = null;
+  // 1階の伏図（「1階」と「伏図」が両方あるページ。基礎伏図は除く）：オメガの足元を桃にする
+  const firstFloor = [];
+  const fl0 = floorPages(pages);
+  if (fl0.first != null) firstFloor.push(fl0.first);
+  else pages.forEach((p, i) => {
+    const t = p.glyphs.map((g) => g.s).join('').normalize('NFKC').replace(/\s+/g, '');
+    if (/1階.*伏図/.test(t) && !/基礎伏図/.test(t)) firstFloor.push(i);
+  });
+  // 2階建て：2階の柱伏図の耐力壁（壁の記号）を、通り芯の名前で 1階の柱伏図に落とし込む
+  let upper = null;
+  const fl = fl0;
+  if (walls && fl.first != null && fl.second != null && fl.first !== fl.second) {
+    const gridOf = (i) => { const solid = new Set(dropDashes(segs[i])); return gridLines(segs[i].filter((x) => !solid.has(x))); };
+    const g1 = gridOf(fl.first), g2 = gridOf(fl.second);
+    const l1 = gridLabels(pages[fl.first].glyphs, g1), l2 = gridLabels(pages[fl.second].glyphs, g2);
+    const fx = fitAxis(l2.x, l1.x), fy = fitAxis(l2.y, l1.y);
+    const m2 = walls.marks.filter((m) => m.page === fl.second && !walls.legend.rows.find((r) => r.key === m.key)?.struck);
+    if (fx && fy && m2.length) upper = { page: fl.first, from: fl.second, walls: upperWalls(m2, g2, fx, fy, { solid: dropDashes(segs[fl.second]) }) };
+  }
+  return { pages, legend, found, walls, kiso, firstFloor, upper };
+}
