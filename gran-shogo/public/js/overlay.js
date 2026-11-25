@@ -24,7 +24,8 @@ export async function renderPage(pdf, pageNo, width) {
       const s = (it.str || '').trim();
       if (!s) continue;
       const [x, y] = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
-      words.push({ text: s, x, y });
+      // w・h：文字の幅と高さ（画像の px）。y は文字の下の線
+      words.push({ text: s, x, y, w: (it.width || 0) * scale, h: Math.hypot(it.transform[2], it.transform[3]) * scale || 8 * scale });
     }
   } catch { /* 文字が取れなくても線の比較はできる */ }
   return { canvas, scale, words };
@@ -119,7 +120,9 @@ function searchWide(A, B, pts, range) {
 const TILE = 48;
 
 /**
- * 2枚のページ画像を重ねる。返り値 { canvas, boxes:[{x,y,w,h}], shift, moved }
+ * 2枚のページ画像を重ねる。返り値 { canvas, boxes:[{x,y,w,h,bx,by,textOnly}], shift, moved }
+ * boxes の x,y は重ね合わせ（変更前の位置）、bx,by は変更後の図面での位置。
+ * textOnly：その場所の違いが「同じ文字が少し動いただけ」（説明の文字の位置調整など）
  * words：{ a, b }（renderPage の words）。あれば、図がまとまって動いた分を場所ごとに合わせる。
  * moved：ページ全体と違うずれで合わせた範囲（図が動いた場所）の数
  * scan：片方がスキャン（にじみ・線の太さの違いを大目に見る）
@@ -148,6 +151,9 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
     if (rest.length < inkA.length * 0.08 || rest.length < 400) break;
     if (!add(searchWide(A, B, rest, Math.round(w * 0.08)))) break;
   }
+  // 両方の版に1つずつある同じ文字で、位置だけ少し変わったもの（説明の文字の位置調整など）の範囲
+  const mA = new Uint8Array(A.w * A.h), mB = new Uint8Array(B.w * B.h);
+  for (const [wa, wb] of movedWords(words, w)) { paint(mA, A, wa); paint(mB, B, wb); }
   const at = (X, x, y) => (x >= 0 && y >= 0 && x < X.w && y < X.h ? X.g[y * X.w + x] < DARK : false);
   // 1px のにじみは差分にしない（近くに相手の線があれば同じ線とみなす）
   // スキャンは線がにじみ・太さも違うので、2px まで離れていても同じ線とみなす
@@ -199,7 +205,7 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
   const px = img.data;
   const cell = 16;
   const gw = Math.ceil(w / cell), gh = Math.ceil(h / cell);
-  const diff = new Uint16Array(gw * gh);
+  const diff = new Uint16Array(gw * gh), diffT = new Uint16Array(gw * gh);
   // マスの境目で線が切れて赤・青に出ないよう、隣のマスのずれでも合えば同じ線とみなす
   const others = [];
   for (let ty = 0; ty < th; ty++) for (let tx = 0; tx < tw; tx++) {
@@ -220,8 +226,8 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
       const a = at(A, x, y), b = at(B, x + dx, y + dy);
       let r = 255, g = 255, bl = 255;
       if (a && b) { r = g = bl = 196; }
-      else if (a && !near(B, x + dx, y + dy) && !others[ti].some(s => near(B, x + s.dx, y + s.dy))) { r = 200; g = 55; bl = 45; diff[((y / cell) | 0) * gw + ((x / cell) | 0)]++; }
-      else if (b && !near(A, x, y) && !others[ti].some(s => near(A, x + dx - s.dx, y + dy - s.dy))) { r = 68; g = 107; bl = 235; diff[((y / cell) | 0) * gw + ((x / cell) | 0)]++; }
+      else if (a && !near(B, x + dx, y + dy) && !others[ti].some(s => near(B, x + s.dx, y + s.dy))) { r = 200; g = 55; bl = 45; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; if (mA[y * w + x]) diffT[ci]++; }
+      else if (b && !near(A, x, y) && !others[ti].some(s => near(A, x + dx - s.dx, y + dy - s.dy))) { r = 68; g = 107; bl = 235; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; const bx = x + dx, by = y + dy; if (bx >= 0 && by >= 0 && bx < B.w && by < B.h && mB[by * B.w + bx]) diffT[ci]++; }
       else if (a || b) { r = g = bl = 196; }
       px[i] = r; px[i + 1] = g; px[i + 2] = bl; px[i + 3] = 255;
     }
@@ -246,10 +252,42 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
   }
   ctx.putImageData(img, 0, 0);
   const boxes = regions(diff, gw, gh, cell, scan ? 12 : 6);
+  for (const b of boxes) {
+    // 変更後の図面での位置（その場所で合わせたずれの分だけ動かす）
+    const ti = Math.min(th - 1, ((b.y + b.h / 2) / TILE) | 0) * tw + Math.min(tw - 1, ((b.x + b.w / 2) / TILE) | 0);
+    b.bx = b.x + shifts[label[ti]].dx; b.by = b.y + shifts[label[ti]].dy;
+    // 違いの9割近くが「位置だけ変わった文字」の上なら、文字の位置調整だけとみなす
+    let n = 0, t = 0;
+    for (let cy = b.y / cell; cy < (b.y + b.h) / cell; cy++) for (let cx = b.x / cell; cx < (b.x + b.w) / cell; cx++) { n += diff[cy * gw + cx]; t += diffT[cy * gw + cx]; }
+    b.textOnly = n > 0 && t >= n * 0.85;
+  }
   ctx.strokeStyle = '#f7890a';
   ctx.lineWidth = Math.max(2, w / 600);
   for (const b of boxes) roundRect(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 10);
   return { canvas: out, boxes, shift, moved };
+}
+
+// 両方の版に1回ずつ出てくる同じ文字で、位置が少しだけ変わったものの組 [[変更前, 変更後], …]
+// （図がまとまって動いた分は compose が合わせるので、ここでは「少し」の上限だけ見る）
+export function movedWords(words, width) {
+  if (!words?.a?.length || !words?.b?.length) return [];
+  const key = t => String(t).replace(/\s+/g, '');
+  const once = list => { const m = new Map(); for (const x of list) { const k = key(x.text); m.set(k, m.has(k) ? null : x); } return m; };
+  const A = once(words.a), B = once(words.b), out = [];
+  for (const [k, a] of A) {
+    const b = B.get(k);
+    if (!k || !a || !b) continue;
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    if (d > 2 && d < width * 0.12) out.push([a, b]);
+  }
+  return out;
+}
+
+function paint(mask, X, wd) {
+  const pad = 3, hh = wd.h || 10;
+  const x0 = Math.max(0, Math.floor(wd.x - pad)), x1 = Math.min(X.w - 1, Math.ceil(wd.x + (wd.w || hh) + pad));
+  const y0 = Math.max(0, Math.floor(wd.y - hh - pad)), y1 = Math.min(X.h - 1, Math.ceil(wd.y + hh * 0.3 + pad));
+  for (let y = y0; y <= y1; y++) mask.fill(1, y * X.w + x0, y * X.w + x1 + 1);
 }
 
 // 差分の多いマスをつなげて、変更箇所のかたまりにする

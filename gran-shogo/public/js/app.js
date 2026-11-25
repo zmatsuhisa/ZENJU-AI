@@ -9,6 +9,7 @@ import { escapeHtml as h } from './core/normalize.js';
 import { renderPage, compose } from './overlay.js';
 import { showMarkup } from './markup/view.js';
 import { loadCv } from './markup/engine.js';
+import { printSheets, saveZip, today } from './sheets.js';
 import './pagematch.js'; // globalThis.PageMatch（ページの対応づけ。単体の「図面差分チェック」と同じ部品）
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs', import.meta.url).href;
@@ -411,7 +412,7 @@ function renderList() {
 
 // 図面の重ね合わせ（今この画面で読み込んだ新旧PDFがあるときだけ）
 // ページの切り替え：◀ ▶ の矢印、横にスクロールできるページ一覧（変更の件数つき）、キーボードの ← →
-const ov = { docs: null, jobs: [], pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0 };
+const ov = { docs: null, jobs: [], pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0, pick: {}, textMoves: false };
 
 async function showOverlay() {
   const slot = $('#overlay-slot');
@@ -424,12 +425,19 @@ async function showOverlay() {
       <button class="pg-arrow" type="button" data-go="1" aria-label="次のページ">›</button>
     </div>
     <div class="pad legend no-print"><span><i class="o"></i>変更前だけにある線・文字</span><span><i class="n"></i>変更後だけにある線・文字</span><span><i class="c"></i>変わった場所</span>
-    <span class="seg" role="group" aria-label="重ね合わせの表示" style="margin-left:auto"><button type="button" class="on" data-ov="mix" aria-pressed="true">重ね</button><button type="button" data-ov="old" aria-pressed="false">変更前</button><button type="button" data-ov="new" aria-pressed="false">変更後</button></span></div>
+    <span class="seg" role="group" aria-label="重ね合わせの表示" style="margin-left:auto"><button type="button" class="on" data-ov="mix" aria-pressed="true">重ね</button><button type="button" data-ov="old" aria-pressed="false">変更前</button><button type="button" data-ov="new" aria-pressed="false">変更後</button><button type="button" data-ov="mark" aria-pressed="false">変更後に○印</button></span></div>
+    <div class="pad ov-marks no-print" id="ov-marks" hidden>
+      <span class="small muted" id="ov-mark-note"></span>
+      <label class="opt"><input type="checkbox" id="ov-textmoves"><span>文字の位置を動かしただけの所にも○を付ける</span></label>
+      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" id="ov-print" type="button">○印つきの図面を印刷・PDFで保存</button>
+        <button class="btn btn-sm" id="ov-zip" type="button">画像でまとめて保存</button></span>
+    </div>
     <div class="overlay-wrap" id="ov"></div></section>`;
   try {
     const [pa, pb] = await Promise.all([state.session.old, state.session.new].map(f => pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise));
     const jobs = pageJobs(state.run?.pagemap, pa.numPages, pb.numPages);
-    Object.assign(ov, { docs: [pa, pb], jobs, pages: jobs.length, page: 1, mode: 'mix', cache: new Map(), counts: {} });
+    Object.assign(ov, { docs: [pa, pb], jobs, pages: jobs.length, page: 1, mode: 'mix', cache: new Map(), counts: {}, pick: {}, textMoves: false });
     const pm = state.run?.pagemap;
     if (pm) {
       const swapped = pm.pairs.filter(x => x.a !== x.b).length, scans = pm.pairs.filter(x => x.by === '特徴点').length;
@@ -451,9 +459,11 @@ async function showOverlay() {
     slot.querySelectorAll('[data-ov]').forEach(b => b.onclick = () => {
       ov.mode = b.dataset.ov;
       slot.querySelectorAll('[data-ov]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
-      const c = ov.cache.get(ov.page);
-      if (c) $('#ov').replaceChildren(c.views[ov.mode]);
+      showView();
     });
+    $('#ov-textmoves').onchange = e => { ov.textMoves = e.target.checked; showView(); };
+    $('#ov-print').onclick = () => exportMarked('print');
+    $('#ov-zip').onclick = () => exportMarked('zip');
     if (ov.pages > 1) {
       $('#ov-pager').hidden = false;
       $('#ov-pager').querySelectorAll('[data-go]').forEach(b => b.onclick = () => goPage(ov.page + Number(b.dataset.go)));
@@ -535,7 +545,125 @@ async function drawJob(p) {
     const { x, y, w, h: hh } = f.at;
     ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
   }
-  return { views: { mix: canvas, old: ca, new: cb }, lines: boxes.length, text: textBoxes.length, shift, moved, warped, n: boxes.length + textBoxes.length };
+  const marks = markList(boxes, textBoxes, scale);
+  return { views: { mix: canvas, old: ca, new: cb }, after: cb, marks, lines: boxes.length, text: textBoxes.length, shift, moved, warped, n: boxes.length + textBoxes.length };
+}
+
+// ○印を付ける場所（変更後の図面の px）。線の違いと文字の違いが重なる所は1つにまとめる
+function markList(boxes, textBoxes, scale) {
+  const list = [
+    ...boxes.map(b => ({ x: b.bx, y: b.by, w: b.w, h: b.h, textOnly: b.textOnly })),
+    ...textBoxes.map(f => ({ x: (f.at.x - 6) * scale, y: (f.at.y - f.at.h - 6) * scale, w: (f.at.w + 12) * scale, h: (f.at.h + 14) * scale, textOnly: f.type === 'moved' })),
+  ];
+  const hit = (a, b) => a.x < b.x + b.w + 8 && b.x < a.x + a.w + 8 && a.y < b.y + b.h + 8 && b.y < a.y + a.h + 8;
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < list.length && !merged; i++) for (let k = i + 1; k < list.length; k++) {
+      const a = list[i], b = list[k];
+      if (!hit(a, b)) continue;
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      list[i] = { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y, textOnly: a.textOnly && b.textOnly };
+      list.splice(k, 1); merged = true; break;
+    }
+  }
+  return list.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+// その○印を出すか（押して消した・戻したものはそれを優先。文字の位置だけの所は、チェックを入れたときだけ）
+const markOn = (p, i, m) => ov.pick[`${p}:${i}`] ?? (!m.textOnly || ov.textMoves);
+
+// 変更後の図面に○印を描く。forPrint でなければ、消した印も薄い点線で残す（押すと戻せるように）
+function drawMarked(p, c, base = c.after, k = 1) {
+  const out = document.createElement('canvas');
+  out.width = base.width; out.height = base.height;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(base, 0, 0);
+  const forPrint = base !== c.after, lw = Math.max(3, out.width / 450);
+  c.marks.forEach((m, i) => {
+    const on = markOn(p, i, m);
+    if (!on && forPrint) return;
+    const pad = 14 * k, rx = (m.w * k) / 2 * 1.2 + pad, ry = (m.h * k) / 2 * 1.2 + pad;
+    ctx.beginPath();
+    ctx.ellipse((m.x + m.w / 2) * k, (m.y + m.h / 2) * k, Math.max(rx, 22 * k), Math.max(ry, 22 * k), 0, 0, Math.PI * 2);
+    ctx.setLineDash(on ? [] : [10, 8]);
+    ctx.strokeStyle = on ? '#e60012' : 'rgba(120,120,120,.7)';
+    ctx.lineWidth = on ? lw : Math.max(2, lw / 2);
+    ctx.stroke();
+  });
+  return out;
+}
+
+function markCount(p, c) {
+  const on = c.marks.filter((m, i) => markOn(p, i, m)).length;
+  const text = c.marks.filter((m, i) => m.textOnly && !markOn(p, i, m) && ov.pick[`${p}:${i}`] === undefined).length;
+  return { on, text, off: c.marks.length - on - text };
+}
+
+// 今の表示（重ね・変更前・変更後・○印）を出す
+function showView() {
+  const p = ov.page, c = ov.cache.get(p);
+  if (!c) return;
+  const markMode = ov.mode === 'mark' && !c.whole;
+  $('#ov-marks').hidden = ov.mode !== 'mark';
+  if (!markMode) { $('#ov').replaceChildren(c.views[ov.mode] || c.views.new); if (ov.mode === 'mark') $('#ov-mark-note').textContent = 'このページは組になる前の版がないので、○印はありません。'; return; }
+  const cv = drawMarked(p, c);
+  cv.classList.add('markable');
+  cv.onclick = ev => {
+    const r = cv.getBoundingClientRect(), x = (ev.clientX - r.left) * cv.width / r.width, y = (ev.clientY - r.top) * cv.height / r.height;
+    // 押した所にいちばん近い○印（中心からの近さを、印の大きさで割って比べる）
+    let best = -1, bd = 1.6;
+    c.marks.forEach((m, i) => {
+      const d = Math.hypot((x - m.x - m.w / 2) / (m.w / 2 * 1.2 + 22), (y - m.y - m.h / 2) / (m.h / 2 * 1.2 + 22));
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best < 0) return;
+    const key = `${p}:${best}`;
+    ov.pick[key] = !markOn(p, best, c.marks[best]);
+    const top = $('#ov').scrollTop;
+    showView();
+    $('#ov').scrollTop = top;
+  };
+  $('#ov').replaceChildren(cv);
+  const n = markCount(p, c);
+  $('#ov-mark-note').textContent = `○印 ${n.on}か所` + (n.text ? `（文字の位置を動かしただけの所 ${n.text}か所は○なし）` : '') + (n.off ? `・消した印 ${n.off}か所` : '') + '。○を押すと消せます（もう一度押すと戻ります）。';
+}
+
+// ○印つきの変更後図面を、全ページまとめて印刷（PDFで保存）または画像の zip にする
+async function exportMarked(how) {
+  if (!ov.docs || ov.busy) return;
+  ov.busy = true;
+  const prog = $('#ov-prog'), keep = prog.textContent, btns = [$('#ov-print'), $('#ov-zip')];
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const sheets = [], W = 3000; // 印刷用に、変更後の図面を細かく描き直す
+    for (let p = 1; p <= ov.pages; p++) {
+      const j = ov.jobs[p - 1];
+      if (j.kind === 'removed') continue; // 変更後の図面がないページ
+      prog.textContent = `○印つきの図面を用意しています ${p} / ${ov.pages}…`;
+      const c = ov.cache.get(p) || await drawJob(p);
+      ov.counts[p] = c.n;
+      const { canvas: big } = await renderPage(ov.docs[1], j.b, W);
+      const k = big.width / (c.after?.width || big.width);
+      const sheet = c.whole ? big : drawMarked(p, c, big, k);
+      const n = c.whole ? 0 : c.marks.filter((m, i) => markOn(p, i, m)).length;
+      const t = j.title ? `「${j.title}」` : '';
+      sheets.push({ canvas: sheet, name: `${String(j.b).padStart(2, '0')}_新しい版p${j.b}`, title: `新しい版 p.${j.b}${t}　${c.whole ? '増えたページ' : `変更の○印 ${n}か所`}` });
+    }
+    if (!sheets.length) { toast('印刷できるページがありません'); return; }
+    prog.textContent = how === 'zip' ? '画像をまとめています…' : '印刷の画面を開いています…';
+    const name = state.session.new?.name?.replace(/\.pdf$/i, '') || '変更後';
+    if (how === 'zip') { await saveZip(sheets, `${name}_○印つき_${today()}.zip`); toast(`${sheets.length}ページを画像にして保存しました`); }
+    else await printSheets(sheets, { heading: `${name}（変更前：${state.session.old?.name || ''}）` });
+  } catch (e) {
+    console.error(e);
+    toast('まとめて保存できませんでした：' + e.message, 6000);
+  } finally {
+    ov.busy = false;
+    btns.forEach(b => { b.disabled = false; });
+    prog.textContent = keep;
+    renderStrip();
+  }
 }
 
 async function goPage(p) {
@@ -556,7 +684,7 @@ async function goPage(p) {
   if (my !== ov.seq) return;
   $('#ov').classList.remove('loading');
   const c = ov.cache.get(p);
-  $('#ov').replaceChildren(c.views[ov.mode]);
+  showView();
   $('#ov').scrollTop = 0;
   const j = ov.jobs[p - 1];
   prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}　` : ''}${jobTitle(j)}` +

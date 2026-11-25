@@ -22,8 +22,8 @@ SAMPLES = {
     "shiage.xlsx": "仕上表.xlsx", "estimate_old.xlsx": "見積_旧.xlsx", "estimate_new.xlsx": "見積_新.xlsx",
 }
 # 依存される側から順に並べる
-ORDER = ["core/normalize.js", "core/shift.js", "core/readers.js", "core/diff.js", "core/check.js",
-         "overlay.js", "markup/engine.js", "markup/view.js"]
+ORDER = ["core/normalize.js", "core/shift.js", "core/zip.js", "core/readers.js", "core/diff.js", "core/check.js",
+         "overlay.js", "sheets.js", "markup/engine.js", "markup/view.js"]
 
 
 def replace_once(s: str, old: str, new: str) -> str:

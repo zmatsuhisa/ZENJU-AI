@@ -2,6 +2,7 @@
 // 打合せで図面に手書きした修正指示を見つけ、打合せ後の図面に反映されたかを確かめる。
 // 画像の処理はすべてこのブラウザの中（opencv.js）。資料は外に送らない。
 import { loadCv, analyze } from './engine.js';
+import { printSheets, saveZip, today } from '../sheets.js';
 
 const JUDGE = {
   ok: ['反映あり', 'chip-green', '#2f9e44'],
@@ -172,6 +173,8 @@ function renderResult() {
     ${mismatchNote(r)}
     <div class="tools no-print">
       <button class="btn btn-sm" id="mk-copy" type="button">一覧をコピー</button>
+      <button class="btn btn-sm" id="mk-print" type="button">全ページを印刷・PDFで保存</button>
+      <button class="btn btn-sm" id="mk-zip" type="button">全ページを画像でまとめて保存</button>
       <label class="opt mk-opt"><input type="checkbox" id="mk-hide" ${st.hideDone ? 'checked' : ''}><span>確認済み・指示ではないものを隠す</span></label>
     </div>
     <section class="card section">
@@ -194,6 +197,8 @@ function renderResult() {
   el.querySelectorAll('.summary .stat').forEach(b => b.classList.toggle('on', b.dataset.f === st.filter && st.filter !== 'all'));
   el.querySelector('#mk-hide').onchange = e => { st.hideDone = e.target.checked; renderPage(); };
   el.querySelector('#mk-copy').onclick = copyList;
+  el.querySelector('#mk-print').onclick = () => exportPages('print');
+  el.querySelector('#mk-zip').onclick = () => exportPages('zip');
   el.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(st.page + Number(b.dataset.go)));
   el.querySelector('#mk-strip').onclick = e => { const b = e.target.closest('[data-p]'); if (b) go(Number(b.dataset.p)); };
   renderPage();
@@ -322,6 +327,32 @@ function reason(e, mode) {
     : mode === 'after' ? '打合せ前の版がないため、反映は自動で判定しません。スキャンと最新図面を見比べてください' : '打合せ後の版に合うページがありません';
   if (e.judge === 'ok') return mode === 'trio' ? '書き込みの周りで図面が変わっています（反映済みと思われます）' : 'スキャンと打合せ後の版で、周りの線が変わっています（参考）';
   return mode === 'trio' ? '書き込みの周りで図面が変わっていません。反映漏れでないか確かめてください' : 'スキャンと打合せ後の版で、周りの線が変わっていません。反映漏れでないか確かめてください';
+}
+
+// 全ページ（書き込みの印つき）を、まとめて印刷（PDFで保存）または画像の zip にする
+async function exportPages(how) {
+  const r = st.result;
+  if (!r || st.exporting) return;
+  st.exporting = true;
+  const btns = ['#mk-print', '#mk-zip'].map(s => document.querySelector(s));
+  btns.forEach(b => { if (b) b.disabled = true; });
+  try {
+    const n = p => allEntries().filter(e => e.p === p).length;
+    const sheets = r.pages.map(p => ({
+      canvas: p.status === 'nomatch' ? p.thumb : p.view.canvas,
+      name: `${String(p.seq).padStart(2, '0')}_${plabel(p)}`,
+      title: `${plabel(p)}　${p.status === 'nomatch' ? '合う図面のページなし' : `書き込み ${n(p)}件`}`,
+    })).filter(s => s.canvas);
+    const base = String(r.names.scan || 'スキャン').replace(/\.pdf$/i, '');
+    if (how === 'zip') { await saveZip(sheets, `${base}_書き込みの洗い出し_${today()}.zip`); ctx.toast(`${sheets.length}ページを画像にして保存しました`); }
+    else await printSheets(sheets, { heading: `書き込みの洗い出し：${r.names.scan || ''}` });
+  } catch (e) {
+    console.error(e);
+    ctx.toast('まとめて保存できませんでした：' + e.message);
+  } finally {
+    st.exporting = false;
+    btns.forEach(b => { if (b) b.disabled = false; });
+  }
 }
 
 async function copyList() {

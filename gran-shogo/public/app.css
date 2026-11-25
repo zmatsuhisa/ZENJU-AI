@@ -142,3 +142,19 @@
   .summary .stat.alert { background: #fff; }
   .summary .stat.alert .k, .summary .stat.alert .n, .summary .stat.alert .l { color: var(--ink); }
 }
+
+/* 図面をまとめて印刷（印つきの変更後図面・書き込みの洗い出し）。印刷のときだけ、この図面の並びだけを出す */
+#print-sheets { display: none; }
+@media print {
+  body.print-sheets > *:not(#print-sheets) { display: none !important; }
+  body.print-sheets { background: #fff !important; }
+  body.print-sheets #print-sheets { display: block; }
+  #print-sheets figure { margin: 0; break-after: page; page-break-after: always; break-inside: avoid; }
+  #print-sheets figure:last-child { break-after: auto; page-break-after: auto; }
+  #print-sheets figcaption { font-size: 10pt; margin: 0 0 2mm; }
+  #print-sheets img { display: block; width: 100%; max-height: 180mm; object-fit: contain; }
+}
+/* 印つきの図面：印を押して消す・戻す */
+.ov-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.ov-marks .opt { margin: 0; }
+.overlay-wrap canvas.markable { cursor: pointer; }
