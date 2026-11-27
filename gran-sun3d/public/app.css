@@ -27,6 +27,8 @@ body.noscroll .app{z-index:1001}
 .stage.ui-clear .glass{background:rgba(255,255,255,.14);-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
 .stage.ui-clear .pill .v,.stage.ui-clear .pill .k,.stage.ui-clear .clock .t,.stage.ui-clear .clock .d{text-shadow:0 0 4px #fff,0 0 2px #fff}
 .stage.ui-hide .hud-tl,.stage.ui-hide .clock{display:none}
+.touchhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;font-size:13px;font-weight:700;color:var(--ink);pointer-events:none;white-space:nowrap}
+.touchhint[hidden]{display:none}
 .stage.ui-hide .dock{left:auto}
 .stage.ui-hide .seasons,.stage.ui-hide .selrow{display:none}
 .stage.ui-hide .tlrow{justify-content:flex-end}
