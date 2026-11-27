@@ -373,6 +373,7 @@ const CHIP = {
 
 async function showRun(id) {
   let run;
+  if (state.run?.id !== id) app.innerHTML = skeleton(); // 読み込む間は、形だけ先に出す（Skeleton）
   try { run = await fetchRun(id); } catch (e) { app.innerHTML = `<div class="card empty"><b>${h(e.message)}</b><a href="#history">記録を見る</a></div>`; return; }
   const c = { ng: 0, check: 0, change: 0, done: 0 };
   run.findings.forEach(f => c[stateOf(f, run)]++);
@@ -406,13 +407,15 @@ async function showRun(id) {
   $('#csv').onclick = () => downloadCsv(run);
   if ($('#print')) $('#print').onclick = () => window.print();
   markStats();
+  state.enter = true; // 開いたときだけ、カードを順に浮かび上がらせる（検索のたびには動かさない）
   renderList();
+  countUp(app.querySelectorAll('.summary .cnt'));
   setSync(run.at);
   if (isPair && state.session.runId === run.id && state.session.kind === 'pdf') showOverlay();
 }
 
 function stat(f, k, n, u, l, cls = '') {
-  return `<button type="button" class="card stat ${cls}" data-f="${f}"><span class="k">${k}</span><span class="n">${n}<span class="u">${u}</span></span><span class="l">${l}</span></button>`;
+  return `<button type="button" class="card stat ${cls}" data-f="${f}"><span class="k">${k}</span><span class="n"><span class="cnt" data-to="${n}">${n}</span><span class="u">${u}</span></span><span class="l">${l}</span></button>`;
 }
 function markStats() { app.querySelectorAll('.summary .stat').forEach(b => b.classList.toggle('on', b.dataset.f === state.filter)); }
 
@@ -458,11 +461,12 @@ function renderList() {
     return;
   }
   const link = f => `#item-${run.id}-${f.id}`;
+  el.classList.toggle('enter', !!state.enter); state.enter = false;
   if (state.view === 'card') {
-    el.innerHTML = '<div class="pgrid">' + list.map(f => {
+    el.innerHTML = '<div class="pgrid">' + list.map((f, i) => {
       const st = stateOf(f, run);
       const chip = f.source === 'ai' && st !== 'done' ? ['AI・' + CHIP[st][0], 'chip-blue'] : CHIP[st];
-      return `<a class="card pcard ${st === 'done' ? 'done' : ''}" href="${link(f)}">
+      return `<a class="card pcard ${st === 'done' ? 'done' : ''}" href="${link(f)}" style="--i:${Math.min(i, 12)}">
         <div class="row1"><div class="who"><div class="pname">${h(f.title)}</div><div class="paddr">${h(f.category)}${f.key ? '　' + h(f.key) : ''}${f.name ? '　' + h(f.name) : ''}</div></div><span class="chip ${chip[1]}">${h(chip[0])}</span></div>
         <div class="vals">${f.obs.slice(0, 3).map((o, i) => `<span class="${i > 0 && f.kind !== 'missing' ? 'hl' : ''}">${h(short(o.doc))} <b>${h(clip(o.value, 26))}</b></span>`).join('')}</div>
         <div class="nowph">場所 <b>${h([...new Set(f.obs.map(o => o.loc).filter(l => l && l !== '—'))].slice(0, 2).join('　'))}</b></div>
@@ -841,7 +845,7 @@ function nextLink(run, f) {
 
 async function setConfirmed(run, f, confirmed, note = '') {
   try { run.confirmed = await api.patch(run.id, { findingId: f.id, confirmed, note }); } catch (e) { return toast(e.message); }
-  toast(confirmed ? '確認済みにしました' : '確認済みを取り消しました');
+  toast(confirmed ? '確認済みにしました' : '確認済みを取り消しました', 3200, confirmed ? 'ok' : '');
   showItem(run.id, f.id);
 }
 
@@ -949,12 +953,37 @@ function fmtTime(iso) {
 }
 const short = s => String(s).replace(/\.(pdf|xlsx|xlsm|xls|xlsb|csv)$/i, '');
 const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s));
+// 結果を読み込む間の「形だけ」の画面（Skeleton Shimmer）
+function skeleton() {
+  const card = '<div class="card sk-card"><i class="sk w70"></i><i class="sk w40"></i><i class="sk w90"></i></div>';
+  return `<div class="sk-wrap" aria-busy="true" aria-label="照合結果を読み込んでいます"><i class="sk sk-title"></i>
+    <div class="sk-stats">${'<div class="card sk-stat"><i class="sk w40"></i><i class="sk sk-num"></i></div>'.repeat(4)}</div>
+    <div class="pgrid">${card.repeat(4)}</div></div>`;
+}
+// 集計の数字を 0 から数え上げる（動きを減らす設定のときは、すぐに最後の数字）
+function countUp(els) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  els.forEach(el => {
+    const to = Number(el.dataset.to) || 0;
+    if (!to) return;
+    const t0 = performance.now(), dur = 650 + Math.min(to, 40) * 10;
+    const step = t => {
+      const r = Math.min(1, (t - t0) / dur);
+      el.textContent = Math.round(to * (1 - Math.pow(1 - r, 3)));
+      if (r < 1 && el.isConnected) requestAnimationFrame(step);
+    };
+    el.textContent = '0';
+    requestAnimationFrame(step);
+  });
+}
 function busy(b, on, label) { b.disabled = on; b.innerHTML = on ? `<span class="busy">${h(label)}</span>` : h(label); }
 let toastTimer;
-function toast(text, ms = 3200) {
+function toast(text, ms = 3200, kind = '') {
   let el = $('.toast');
   if (!el) { el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); document.body.append(el); }
   el.textContent = text; el.hidden = false;
+  el.classList.toggle('toast-ok', kind === 'ok');
+  el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); // 出るたびに下からすっと上がる
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 function load(k, d) { try { return localStorage.getItem('gran-shogo:' + k) || d; } catch { return d; } }

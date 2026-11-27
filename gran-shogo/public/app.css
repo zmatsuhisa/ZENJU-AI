@@ -189,3 +189,66 @@
 .ov-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .ov-marks .opt { margin: 0; }
 .overlay-wrap canvas.markable { cursor: pointer; }
+
+/* ---------- 動きのある見せ方（SNS活用メモ：UIマイクロインタラクション36種・ローディング20種） ----------
+   業務の画面なので、光の飾りは入れず「触った手ごたえ」と「待ち時間の見せ方」だけ。動きを減らす設定では止める */
+@keyframes fade-up { from { opacity: .001; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@keyframes pop { 0% { transform: scale(.94); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+@keyframes march { to { background-position: 16px 0, -16px 100%, 0 -16px, 100% 16px; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 14px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* 読み込み中は形だけ先に出す（Skeleton Shimmer） */
+.sk { display: block; height: 12px; border-radius: var(--pill);
+  background: linear-gradient(90deg, #ececec 0%, #f7f7f7 40%, #ececec 80%) 0 0 / 200% 100%; animation: shimmer 1.3s linear infinite; }
+.sk.w40 { width: 40%; } .sk.w70 { width: 70%; } .sk.w90 { width: 90%; }
+.sk-wrap { display: grid; gap: 16px; padding-top: 8px; }
+.sk-title { width: min(320px, 70%); height: 34px; border-radius: 12px; }
+.sk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.sk-stat { display: grid; gap: 10px; padding: 16px 18px; }
+.sk-num { width: 30%; height: 24px; border-radius: 8px; }
+.sk-card { display: grid; gap: 10px; padding: 16px 14px; }
+@media (max-width: 760px) { .sk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* 図面を描いている間も、薄く光が流れる */
+.overlay-wrap.loading::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.65) 50%, transparent 70%) 0 0 / 200% 100%; animation: shimmer 1.2s linear infinite; }
+
+/* 結果を開いたとき、カードが順に浮かび上がる */
+#list.enter .pcard, #list.enter .plist { animation: fade-up .45s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.summary .stat { animation: fade-up .4s cubic-bezier(.2, .7, .2, 1) both; }
+.summary .stat:nth-child(2) { animation-delay: 50ms; } .summary .stat:nth-child(3) { animation-delay: 100ms; } .summary .stat:nth-child(4) { animation-delay: 150ms; }
+.summary .cnt { font-variant-numeric: tabular-nums; }
+
+/* 触った手ごたえ：カードは少し浮き、ボタンは押すと少し沈む */
+.pcard, .stat { transition: transform .18s ease, box-shadow .18s ease; }
+@media (hover: hover) {
+  .pcard:hover { transform: translateY(-3px); }
+  .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+}
+.pcard:active, .stat:active { transform: scale(.985); }
+.btn-primary, .btn { transition: transform .12s ease, box-shadow .18s ease; }
+.btn-primary:active:not(:disabled), .btn:active:not(:disabled) { transform: scale(.96); }
+
+/* ファイルを置く場所：ドラッグしてくると枠が流れ、置いたファイル名はふわっと出る */
+.drop.over { border-color: transparent;
+  background-image: linear-gradient(90deg, var(--orange) 50%, transparent 0), linear-gradient(90deg, var(--orange) 50%, transparent 0),
+    linear-gradient(0deg, var(--orange) 50%, transparent 0), linear-gradient(0deg, var(--orange) 50%, transparent 0);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y; background-size: 16px 2px, 16px 2px, 2px 16px, 2px 16px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0; background-color: #fffaf3; animation: march .6s linear infinite; }
+.drop.filled .fname, .files li { animation: pop .35s ease both; }
+
+/* 照合中の棒に光の筋（動いていることが一目で分かる） */
+.rp-bar:not(.wait) i { background-image: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.55) 50%, transparent 70%), var(--grad-orange);
+  background-size: 200% 100%, 100% 100%; animation: shimmer 1.1s linear infinite; }
+
+/* お知らせ（Toast）：下からすっと上がる。確認済みのときはチェックの印 */
+.toast.pop { animation: toast-in .28s cubic-bezier(.2, .7, .2, 1); }
+.toast.toast-ok::before { content: ""; display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border-radius: 50%;
+  background: var(--green) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk, .overlay-wrap.loading::after, .rp-bar:not(.wait) i, .drop.over { animation: none; }
+  #list.enter .pcard, #list.enter .plist, .summary .stat, .drop.filled .fname, .files li, .toast.pop { animation: none; }
+  .pcard, .stat, .btn, .btn-primary { transition: none; }
+  .pcard:hover, .stat:hover, .pcard:active, .stat:active { transform: none; }
+}
