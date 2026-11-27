@@ -6,7 +6,7 @@ import { norm } from './normalize.js';
  * PDF → { kind:'pdf', pages:[{ page, width, height, chunks:[{text, x, y, w, h}] }] }
  * chunk は「同じ高さで近くに並んだ文字のまとまり」。図面では1つの記入（AW1、W1650 など）が1つの chunk になる。
  */
-export async function readPdf(pdfjs, data, opts = {}) {
+export async function readPdf(pdfjs, data, opts = {}, onPage = null) {
   const task = pdfjs.getDocument({ data, ...opts });
   const doc = await task.promise;
   const pages = [];
@@ -23,6 +23,7 @@ export async function readPdf(pdfjs, data, opts = {}) {
       });
     pages.push({ page: p, width: vp.width, height: vp.height, chunks: groupChunks(items) });
     page.cleanup?.();
+    onPage?.(p, doc.numPages); // 画面の進み具合の表示用（何ページ目まで読んだか）
   }
   await doc.destroy?.();
   return { kind: 'pdf', pages };

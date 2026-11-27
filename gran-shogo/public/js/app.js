@@ -119,6 +119,7 @@ function showCheck() {
             ${dropBox('new', '変更後', state.pair.new)}
           </div>
           <div class="actions"><button class="btn-primary" id="run-pair" type="button">変更箇所を探す</button><span class="small muted" id="pair-msg"></span></div>
+          ${progressBox('pair')}
         </div>
       </section>
       <section class="card section">
@@ -134,6 +135,7 @@ function showCheck() {
             <span>AIでも照合する（仕様の反映漏れなど、記号だけでは分からない食い違い）
             <span class="muted">${ai ? '資料の文字を Anthropic社の Claude に送ります。施主名・金額を含む資料は社内の決まりを確認してから。1〜3分かかります。' : state.config.local ? 'AI照合は社内PCのサーバー版（start.bat）で使えます。この画面ではルール照合だけ動きます。' : 'AI照合は未設定です（サーバーの .env に ANTHROPIC_API_KEY を入れると使えます）。'}</span></span></label>
           <div class="actions"><button class="btn-primary" id="run-multi" type="button">食い違いを探す</button><span class="small muted" id="multi-msg"></span></div>
+          ${progressBox('multi')}
         </div>
       </section>
     </div>
@@ -207,9 +209,29 @@ async function loadSamples() {
   } catch { toast('サンプル資料を読めませんでした'); }
 }
 
-async function parse(f) {
+async function parse(f, onPage) {
   const data = new Uint8Array(f.buf.slice(0));
-  return kindOf(f.name) === 'pdf' ? readPdf(pdfjs, data, PDF_OPTS) : readXlsx(XLSX, data);
+  return kindOf(f.name) === 'pdf' ? readPdf(pdfjs, data, PDF_OPTS, onPage) : readXlsx(XLSX, data);
+}
+
+// 照合中の進み具合（何％まで進んだか）。r を null にすると、終わりの見えない待ち（AI照合）として流れる棒を出す
+function progressBox(id) {
+  return `<div class="run-progress" id="${id}-progress" hidden>
+    <div class="rp-bar" role="progressbar" aria-label="照合の進み具合" aria-valuemin="0" aria-valuemax="100"><i></i></div>
+    <div class="rp-text"><span class="rp-label"></span><b class="rp-pct num"></b></div></div>`;
+}
+function progress(id, r, label) {
+  const box = $(`#${id}-progress`);
+  if (!box) return;
+  if (r === false) { box.hidden = true; return; }
+  box.hidden = false;
+  const bar = box.querySelector('.rp-bar');
+  bar.classList.toggle('wait', r == null);
+  const pct = r == null ? null : Math.max(0, Math.min(100, Math.round(r * 100)));
+  bar.firstElementChild.style.width = pct == null ? '' : pct + '%';
+  if (pct == null) bar.removeAttribute('aria-valuenow'); else bar.setAttribute('aria-valuenow', String(pct));
+  box.querySelector('.rp-label').textContent = label;
+  box.querySelector('.rp-pct').textContent = pct == null ? '' : pct + '%';
 }
 
 async function runPair() {
@@ -219,16 +241,27 @@ async function runPair() {
   if (kindOf(a.name) !== kindOf(b.name)) return (msg.textContent = 'PDF どうし、Excel どうしで比べてください');
   const btn = $('#run-pair');
   busy(btn, true, '比べています');
+  msg.textContent = '';
   try {
-    const [da, db] = await Promise.all([parse(a), parse(b)]);
+    // 進み具合：文字の読み込み 0〜45%、ページの組み合わせ 45〜90%、違いの洗い出し 90〜100%
+    const done = { a: 0, b: 0 }, total = { a: 1, b: 1 };
+    const read = side => (p, n) => {
+      done[side] = p; total[side] = n;
+      progress('pair', 0.45 * (done.a + done.b) / (total.a + total.b), `文字を読んでいます　${side === 'a' ? '変更前' : '変更後'} p.${p}/${n}`);
+    };
+    progress('pair', 0, '文字を読んでいます');
+    const [da, db] = await Promise.all([parse(a, read('a')), parse(b, read('b'))]);
     const kind = da.kind;
-    const pagemap = kind === 'pdf' ? await matchPages(a, b, t => busy(btn, true, t)) : null;
+    const pagemap = kind === 'pdf' ? await matchPages(a, b, (t, r) => { busy(btn, true, '比べています'); progress('pair', 0.45 + 0.45 * (r ?? 0), t); }) : null;
+    progress('pair', 0.92, '違いを洗い出しています');
     const changes = kind === 'pdf' ? diffPdf(da, db, pagemap) : diffXlsx(da, db);
     const findings = changesToFindings(changes, a.name, b.name, kind);
     state.session = { mode: 'pair', kind, old: a, new: b };
+    progress('pair', 1, '終わりました');
     await saveRun({ mode: 'pair', title: `${a.name} → ${b.name}`, docs: [{ name: a.name, role: 'old' }, { name: b.name, role: 'new' }], findings, pagemap });
   } catch (e) {
     console.error(e); msg.textContent = '読み込めませんでした：' + (e.message || e);
+    progress('pair', false);
   } finally { busy(btn, false, '変更箇所を探す'); }
 }
 
@@ -237,14 +270,14 @@ async function runPair() {
 // 2) 文字の読めないページ（スキャン）が残ったら、OpenCV の特徴点でさがし、傾き・伸び縮みを直す変換も求める
 async function matchPages(a, b, say) {
   const [pa, pb] = await Promise.all([a, b].map(f => pdfjs.getDocument({ data: new Uint8Array(f.buf.slice(0)), ...PDF_OPTS }).promise));
-  const fa = await PageMatch.fingerprints(pa, (k, n) => say(`前の版のページを調べています ${k}/${n}`));
-  const fb = await PageMatch.fingerprints(pb, (k, n) => say(`新しい版のページを調べています ${k}/${n}`));
+  const fa = await PageMatch.fingerprints(pa, (k, n) => say(`前の版のページを調べています ${k}/${n}`, 0.4 * k / n));
+  const fb = await PageMatch.fingerprints(pb, (k, n) => say(`新しい版のページを調べています ${k}/${n}`, 0.4 + 0.4 * k / n));
   let m = PageMatch.match(fa, fb);
   if ((PageMatch.hasScan(fa) || PageMatch.hasScan(fb)) && (m.added.length || m.removed.length)) {
-    say('スキャンのページを探す準備をしています');
+    say('スキャンのページを探す準備をしています', 0.8);
     try {
       state.cv ??= (await loadCv(CV_SRC)).cv;
-      m = await PageMatch.refine(state.cv, pa, pb, fa, fb, m, (k, n) => say(`スキャンのページを探しています ${k}/${n}`));
+      m = await PageMatch.refine(state.cv, pa, pb, fa, fb, m, (k, n) => say(`スキャンのページを探しています ${k}/${n}`, 0.8 + 0.2 * k / n));
     } catch (e) { console.error(e); toast('スキャンのページ探しはできませんでした（文字と絵の形で合わせた分だけ比べます）', 6000); }
   }
   pa.destroy(); pb.destroy();
@@ -257,14 +290,23 @@ async function runMulti() {
   if (state.multi.length < 2) return (msg.textContent = '資料を2つ以上置いてください');
   const btn = $('#run-multi');
   busy(btn, true, '照合しています');
+  msg.textContent = '';
+  const withAi = !!(state.useAi && state.config.ai);
+  const span = withAi ? 0.6 : 0.9; // AI照合があるときは、その待ちのぶん棒を残しておく
   try {
     const docs = [];
-    for (const f of state.multi) { msg.textContent = `読み込み中：${f.name}`; docs.push({ name: f.name, role: f.role, data: await parse(f) }); }
-    msg.textContent = '';
+    const n = state.multi.length;
+    for (const [i, f] of state.multi.entries()) {
+      const at = r => span * (i + r) / n;
+      progress('multi', at(0), `読んでいます　${i + 1}/${n}　${f.name}`);
+      docs.push({ name: f.name, role: f.role, data: await parse(f, (p, pn) => progress('multi', at(p / pn), `読んでいます　${i + 1}/${n}　${f.name}　p.${p}/${pn}`)) });
+    }
+    progress('multi', span, '記号・品番をそろえて照らし合わせています');
     const { findings } = crossCheck(docs);
     let ai = null;
-    if (state.useAi && state.config.ai) {
+    if (withAi) {
       busy(btn, true, 'AIが照合しています（1〜3分）');
+      progress('multi', null, 'AIが照合しています（1〜3分。終わるまでこのままお待ちください）');
       try {
         const r = await fetch('api/ai-check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ docs: docs.map(compact), ruleFindings: findings.map(f => ({ title: f.title, message: f.message })) }) });
@@ -278,11 +320,13 @@ async function runMulti() {
       }
     }
     state.session = { mode: 'multi', docs: state.multi.slice() };
+    progress('multi', 1, '終わりました');
     const names = state.multi.map(f => f.name);
     await saveRun({ mode: 'multi', title: names.length > 2 ? `${names[0]} ほか${names.length - 1}件` : names.join(' × '),
       docs: state.multi.map(f => ({ name: f.name, role: f.role })), findings, ai });
   } catch (e) {
     console.error(e); msg.textContent = '読み込めませんでした：' + (e.message || e);
+    progress('multi', false);
   } finally { busy(btn, false, '食い違いを探す'); }
 }
 
@@ -296,8 +340,13 @@ function compact(d) {
 async function saveRun(run) {
   const id = await api.save(run);
   state.session.runId = id;
-  state.filter = 'all'; state.q = '';
+  state.filter = 'all'; state.q = ''; $('#q').value = '';
   location.hash = `#run-${id}`;
+  // 終わったことと、見つかった件数を知らせる
+  const c = { ng: 0, check: 0, change: 0 };
+  run.findings.forEach(f => { c[f.severity === 'ng' ? 'ng' : f.severity === 'check' ? 'check' : 'change']++; });
+  const parts = [c.ng && `不一致 ${c.ng}件`, c.check && `要確認 ${c.check}件`, c.change && `変更 ${c.change}件`].filter(Boolean);
+  toast(parts.length ? `照合が終わりました：${parts.join('・')}` : '照合が終わりました：食い違い・変更は見つかりませんでした', 4500);
 }
 
 // ---------- 照合結果 ----------
@@ -345,7 +394,14 @@ async function showRun(id) {
       <a class="btn btn-sm" href="#check">別の資料を照合する</a>
     </div>
     <div id="overlay-slot"></div>
+    ${run.findings.length ? `<div class="list-head no-print">
+      <div class="done-track" id="done-track"></div>
+      <label class="list-search" for="rq"><span class="ic" aria-hidden="true"></span>
+        <input id="rq" type="search" placeholder="記号・品番・資料名で探す（例：AW1、DL-1）" value="${h(state.q)}" autocomplete="off">
+        <span class="hits small muted" id="rq-hits" aria-live="polite"></span></label>
+    </div>` : ''}
     <div id="list"></div>`;
+  $('#rq')?.addEventListener('input', e => { state.q = e.target.value; $('#q').value = state.q; renderList(); });
   app.querySelectorAll('.summary .stat').forEach(b => b.onclick = () => { state.filter = state.filter === b.dataset.f ? 'all' : b.dataset.f; syncSeg(); renderList(); markStats(); });
   $('#csv').onclick = () => downloadCsv(run);
   if ($('#print')) $('#print').onclick = () => window.print();
@@ -377,12 +433,30 @@ function visible(run) {
   return list.slice().sort(by);
 }
 
+// 確認の進み具合（何件のうち何件を確認済みにしたか）と、検索・絞り込みで出ている件数
+function renderDoneTrack(run, shown) {
+  const el = $('#done-track');
+  if (!el) return;
+  const total = run.findings.length, done = run.findings.filter(f => run.confirmed[f.id]).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  el.innerHTML = `<div class="dt-text"><span>確認の進み具合</span><b class="num">${done} / ${total}件（${pct}%）</b>${done === total ? '<span class="chip chip-green">すべて確認済み</span>' : ''}</div>
+    <div class="dt-bar" role="progressbar" aria-label="確認済みの割合" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>`;
+  const hits = $('#rq-hits');
+  if (hits) hits.textContent = shown === total ? '' : `${shown}件を表示`;
+  if ($('#rq') && $('#rq').value !== state.q) $('#rq').value = state.q;
+}
+
 function renderList() {
   const run = state.run, el = $('#list');
   if (!el || !run) return;
   const list = visible(run);
+  renderDoneTrack(run, list.length);
   if (!run.findings.length) { el.innerHTML = `<div class="card empty"><b>食い違い・変更は見つかりませんでした</b>読み取れた文字の範囲での結果です。スキャンしたPDF（画像だけのPDF）は文字を読めません。</div>`; return; }
-  if (!list.length) { el.innerHTML = `<div class="card empty"><b>条件に合う指摘はありません</b>表示設定の絞り込みを外してください。</div>`; return; }
+  if (!list.length) {
+    el.innerHTML = `<div class="card empty"><b>条件に合う指摘はありません</b>検索の言葉か、指摘の種類の絞り込みを外すと出てきます。<button class="btn btn-sm" id="clear-filter" type="button">条件を戻す</button></div>`;
+    $('#clear-filter').onclick = () => { state.q = ''; state.filter = 'all'; $('#q').value = ''; syncSeg(); markStats(); renderList(); };
+    return;
+  }
   const link = f => `#item-${run.id}-${f.id}`;
   if (state.view === 'card') {
     el.innerHTML = '<div class="pgrid">' + list.map(f => {
