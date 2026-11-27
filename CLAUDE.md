@@ -1,22 +1,27 @@
 # ZENJU-AI — Claude Code 向けの決まりごと
 
-グランハウス（注文住宅）の社内ツールを置くリポジトリ。今あるのは `gran-shogo/`（資料照合）だけ。
-はじめて触るときは `gran-shogo/HANDOFF.md` → `gran-shogo/README.md` → `gran-shogo/research/README.md` の順に読む。
+グランハウス（注文住宅）の社内ツールを置くリポジトリ。今あるのは `gran-shogo/`（資料照合）と `gran-sun3d/`（日照3D）。
+資料照合をはじめて触るときは `gran-shogo/HANDOFF.md` → `gran-shogo/README.md` → `gran-shogo/research/README.md` の順に読む。
+日照3D は `gran-sun3d/HANDOFF.md` → `gran-sun3d/README.md`。
 
 ## 必ず守ること
-- **お客様の資料をリポジトリに入れない。** 図面PDF・スキャン・見積・施主名・住所・金額は、コード・テスト・コメント・コミットメッセージ・PR・Issue のどこにも書かない。物件は記号（hi / or / se / nu / ya / ka …）で書く。テスト用の図面はリポジトリの外のフォルダに置き、環境変数 `DATA` で渡す。
+- **お客様の資料をリポジトリに入れない。** 図面PDF・スキャン・見積・施主名・住所・金額は、コード・テスト・コメント・コミットメッセージ・PR・Issue のどこにも書かない。物件は記号（hi / or / se / nu / ya / ka …）で書く。テスト用の図面はリポジトリの外のフォルダに置き、環境変数 `DATA` で渡す。日照3D の敷地データ（敷地の形・緯度経度・住所の入った `sites/*.json`）も同じで、外のフォルダに置いて環境変数 `SITES` で渡す。
 - **有料の API を使う仕組みにしない。** 個人開発で費用をかけられないため、判定はブラウザの中の処理（pdf.js・OpenCV.js など無料のオープンソース）で行う。AI照合（Claude API）は「任意・キーがあるときだけ」の今の形から広げない。
 - **資料はブラウザの外へ送らない。** PDF の読み込み・照合・書き込みの洗い出しは端末の中で完結させる。外部へ送る処理を足すときは、必ず先に依頼者に相談する。
 - 画面の言葉は、現場の人が読んで分かるやさしい日本語にする（専門用語・英語の略語を画面に出さない）。
 - 見た目は `public/gran-os-base.css`（グランOS 基本CSS。値を変えない）に合わせ、このアプリだけの部品は `public/app.css` に書く。
 
-## よく使うコマンド（`gran-shogo/` で実行）
+## 資料照合のコマンド（`gran-shogo/` で実行）
 - `npm install` … ライブラリと画面用ファイル（public/vendor）を用意
 - `npm start` … http://127.0.0.1:3985/ で起動
 - `npm test` … 単体テスト（19件。変更したら必ず通す）
 - `DATA=<テスト用図面フォルダ> research/e2e/run_labeled.sh` … 正解表のある4物件で MARKUP を採点（今は「指示 40/40 正解」。これを下げる変更は入れない）
 - `python3 scripts/build_artifact.py <出力先>` … スマホで開ける claude.ai Artifact 版を作る
 - `python3 scripts/build_single_html.py <出力先.html>` … Claude なしで動く1ファイル版（AI照合なし）を作る
+
+## 日照3D（`gran-sun3d/` で実行）
+- `SITES=<敷地データのフォルダ> npm start` … http://127.0.0.1:3986/ で起動
+- `npm test` … 太陽の位置・影・計画の建物の計算のテスト（7件）
 
 ## 進め方
 - 1つの課題 = 1つのブランチ = 1つの PR。課題は GitHub の Issue にある。

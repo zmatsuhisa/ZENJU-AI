@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="GRANHOUSE">
+  <!-- グランハウスのシンボルマーク。granhouse.co.jp の favicon（android-icon-192x192.png）から
+       形と色（#F6AB00）をそのまま起こしたもの。外側の「Γ」＋内側の「C」でGを作っている -->
+  <g fill="#F6AB00">
+    <rect x="0" y="0" width="192" height="44" rx="6"/>
+    <rect x="0" y="0" width="44" height="192" rx="6"/>
+    <rect x="70" y="74" width="122" height="44" rx="6"/>
+    <rect x="70" y="118" width="46" height="30"/>
+    <rect x="70" y="148" width="122" height="44" rx="6"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+{
+  "name": "gran-sun3d",
+  "version": "0.1.0",
+  "private": true,
+  "description": "グランOS 日照3D：敷地まわりの街並みを3Dで作り、日付・時刻で影と敷地の日照時間を確かめる",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  }
+}
