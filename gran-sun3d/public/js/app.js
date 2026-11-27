@@ -274,37 +274,13 @@ const MAXI = $('full').innerHTML, XI = '<svg viewBox="0 0 24 24" width="20" heig
 let full = false;
 function setFull(on) {
   full = on; $('full').innerHTML = on ? XI : MAXI; $('stagecard').classList.toggle('full', on); document.body.classList.toggle('noscroll', on); $('full').setAttribute('aria-pressed', on); $('full').setAttribute('aria-label', on ? '拡大を閉じる' : '3Dを拡大');
-  orbit.enabled = !coarse || on; rnd.domElement.style.touchAction = (coarse && !on) ? 'pan-y' : 'none'; setTimeout(size, 30);
+  // 1本の指で回す・2本の指で寄る／ずらす（拡大していなくても）。ページのスクロールは3Dの外側で
+  orbit.enabled = true; rnd.domElement.style.touchAction = 'none'; setTimeout(size, 30);
 }
 $('full').addEventListener('click', () => setFull(!full));
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && full) setFull(false); });
 setFull(false);
 
-// スマホ（拡大していないとき）：1本指はページのスクロール、2本指で 回す（左右）・傾ける（上下）・寄る（つまむ）
-const hint = Object.assign(document.createElement('div'), { className: 'glass touchhint', textContent: '2本の指で 回す・寄る', hidden: true });
-stage.appendChild(hint);
-let hintT = 0;
-function showHint() { if (!coarse || full) return; hint.hidden = false; clearTimeout(hintT); hintT = setTimeout(() => hint.hidden = true, 2200); }
-let tw = null; const sph = new THREE.Spherical(), off = new THREE.Vector3();
-const two = e => { const [a, b] = e.touches; return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2, d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) }; };
-rnd.domElement.addEventListener('touchstart', e => {
-  if (!coarse || full) return;
-  if (e.touches.length >= 2) { e.preventDefault(); tw = two(e); hint.hidden = true; drag = null; down = null; }
-  else showHint();
-}, { passive: false });
-rnd.domElement.addEventListener('touchmove', e => {
-  if (!coarse || full || e.touches.length < 2) return;
-  e.preventDefault();
-  const n = two(e); if (!tw) { tw = n; return; }
-  off.copy(cam.position).sub(orbit.target); sph.setFromVector3(off);
-  const h = rnd.domElement.clientHeight || 1;
-  sph.theta -= (n.x - tw.x) / h * Math.PI * 1.2;
-  sph.phi = Math.max(.05, Math.min(orbit.maxPolarAngle, sph.phi - (n.y - tw.y) / h * Math.PI));
-  if (tw.d > 10 && n.d > 10) sph.radius = Math.max(orbit.minDistance, Math.min(orbit.maxDistance, sph.radius * tw.d / n.d));
-  sph.makeSafe(); off.setFromSpherical(sph); cam.position.copy(orbit.target).add(off); cam.lookAt(orbit.target);
-  tw = n;
-}, { passive: false });
-rnd.domElement.addEventListener('touchend', e => { if (e.touches.length < 2) tw = null; });
 const UIM = ['通常', '透明', '隠す']; let uim = +(store.get('gos-sun-ui') || 0);
 function setUI(i) { uim = i % 3; stage.classList.toggle('ui-clear', uim === 1); stage.classList.toggle('ui-hide', uim === 2); $('uib').setAttribute('aria-label', 'パネル：' + UIM[uim]); $('uib').title = 'パネル：' + UIM[uim]; $('uib').setAttribute('aria-pressed', uim > 0); store.set('gos-sun-ui', uim); }
 $('uib').addEventListener('click', () => setUI(uim + 1)); setUI(uim);
@@ -462,7 +438,7 @@ let down = null, drag = null;
 function setRay(e) { const r = rnd.domElement.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(ndc, cam); }
 rnd.domElement.addEventListener('pointerdown', e => {
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
-  if (!planG || (coarse && !full)) return;
+  if (!planG) return;
   setRay(e); const hit = ray.intersectObjects(planG.children.filter(c => c.userData.plan))[0];
   if (hit && ray.ray.intersectPlane(gplane, hitP)) { const [u, v] = toUV(hitP.x, hitP.z); drag = { du: plan.u - u, dn: plan.n - v }; orbit.enabled = false; rnd.domElement.setPointerCapture(e.pointerId); }
 });
@@ -471,7 +447,7 @@ rnd.domElement.addEventListener('pointermove', e => {
   if (ray.ray.intersectPlane(gplane, hitP)) { const [u, v] = toUV(hitP.x, hitP.z); plan.u = u + drag.du; plan.n = v + drag.dn; planChanged(false); }
 });
 rnd.domElement.addEventListener('pointerup', e => {
-  if (drag) { drag = null; orbit.enabled = !coarse || full; planChanged(true); down = null; return; }
+  if (drag) { drag = null; orbit.enabled = true; planChanged(true); down = null; return; }
   if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6 || performance.now() - down.t > 600) { down = null; return; }
   down = null; if (!cityG) return;
   setRay(e); const hit = ray.intersectObjects(cityG.children)[0];

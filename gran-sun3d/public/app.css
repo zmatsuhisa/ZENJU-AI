@@ -27,8 +27,6 @@ body.noscroll .app{z-index:1001}
 .stage.ui-clear .glass{background:rgba(255,255,255,.14);-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
 .stage.ui-clear .pill .v,.stage.ui-clear .pill .k,.stage.ui-clear .clock .t,.stage.ui-clear .clock .d{text-shadow:0 0 4px #fff,0 0 2px #fff}
 .stage.ui-hide .hud-tl,.stage.ui-hide .clock{display:none}
-.touchhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;font-size:13px;font-weight:700;color:var(--ink);pointer-events:none;white-space:nowrap}
-.touchhint[hidden]{display:none}
 .stage.ui-hide .dock{left:auto}
 .stage.ui-hide .seasons,.stage.ui-hide .selrow{display:none}
 .stage.ui-hide .tlrow{justify-content:flex-end}
@@ -106,7 +104,8 @@ body.noscroll .app{z-index:1001}
 .sitesel{font:inherit;font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:var(--pill);background:#fff;color:var(--ink);padding:6px 12px;max-width:180px}
 
 @media (max-width:760px){
-  .stage{height:calc(100svh - 150px);min-height:520px}
+  /* 3Dの上は指で回すので、下にページをスクロールできる余白を残す */
+  .stage{height:calc(100svh - 200px);min-height:480px}
   .clock{min-width:0;padding:8px 12px 6px}.clock .t{font-size:32px}.clock svg{width:120px;height:36px}
   .hud-tl{max-width:calc(100% - 160px)}.pill .v{font-size:18px}
   .tools{grid-template-columns:1fr}
