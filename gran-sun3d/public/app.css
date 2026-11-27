@@ -121,3 +121,20 @@ body.noscroll .app{z-index:1001}
   .topline{flex-wrap:wrap}
   .icons{margin-left:0;width:100%;justify-content:space-between}
 }
+
+/* 配置図のページ */
+.plan-stage{background:#eeece6}
+.plan-stage canvas{touch-action:none;cursor:crosshair}
+.hint{position:absolute;right:10px;top:10px;max-width:min(320px,calc(100% - 200px));padding:10px 14px;font-size:12px;font-weight:700;line-height:1.6;color:var(--ink);pointer-events:none}
+.hint[hidden]{display:none}
+.setgrid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center}
+.setgrid .sk{font-size:12px;font-weight:700;color:var(--ink-2)}
+.setgrid .seg{margin:0;flex-wrap:wrap}
+.ib:disabled{opacity:.35;cursor:default}
+.phead .sub .btn{margin-left:8px}
+@media (max-width:760px){
+  .hint{left:auto;right:10px;top:10px;max-width:calc(100% - 150px);font-size:12px;padding:8px 12px}
+  .plan-stage .pill .v{font-size:16px}
+  .setgrid{grid-template-columns:1fr}
+  .setgrid .sk{margin-top:6px}
+}

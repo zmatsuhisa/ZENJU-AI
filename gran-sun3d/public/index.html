@@ -33,7 +33,7 @@
     <a href="#" data-v="top">PLAN</a>
     <a href="#" data-v="eye">EYE</a>
   </nav>
-  <div class="sync"><select class="sitesel" id="sitesel" aria-label="敷地を選ぶ" hidden></select><span id="srcl"><i class="dot"></i>地理院データ</span></div>
+  <div class="sync"><a class="btn btn-sm" id="toplan" href="plan.html">配置図で描く</a><select class="sitesel" id="sitesel" aria-label="敷地を選ぶ" hidden></select><span id="srcl"><i class="dot"></i>地理院データ</span></div>
 </header>
 
 <main class="app">
@@ -96,8 +96,9 @@
   <section class="tools">
     <div class="card" id="plancard">
       <h2>計画の建物を置いて比べる</h2>
-      <p class="lead">敷地に家の箱を置くと、南の庭と1階LDKの窓（南の面のまん中・床から1.2m）に何時間日が当たるかを、平屋と2階建てで比べます。パソコンでは3Dの箱を引っぱって動かせます。</p>
-      <div class="seg" role="group" aria-label="計画の建物"><button type="button" data-pf="0" aria-pressed="true">置かない</button><button type="button" data-pf="1" aria-pressed="false">平屋</button><button type="button" data-pf="2" aria-pressed="false">2階建て</button></div>
+      <p class="lead">敷地に家の箱を置くと、南の庭と1階LDKの窓（南の面のまん中・床から1.2m）に何時間日が当たるかを、平屋と2階建てで比べます。3Dの箱は指やマウスで引っぱって動かせます。建物の形を自分で描くときは<a href="plan.html" id="toplan2">配置図</a>で外周を描き、「配置図の形」を選びます。</p>
+      <div class="seg" role="group" aria-label="計画の建物"><button type="button" data-pf="0" aria-pressed="true">置かない</button><button type="button" data-pf="1" aria-pressed="false">平屋</button><button type="button" data-pf="2" aria-pressed="false">2階建て</button><button type="button" data-pf="3" aria-pressed="false">配置図の形</button></div>
+      <p class="tip" id="drawnote"></p>
       <div class="sliders" id="psl" aria-disabled="true">
         <label for="pw">間口（東西）</label><input type="range" id="pw" min="5" max="20" step="0.1"><output id="pwo">-</output>
         <label for="pd">奥行（南北）</label><input type="range" id="pd" min="4" max="15" step="0.1"><output id="pdo">-</output>

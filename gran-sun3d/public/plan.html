@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>グランOS｜配置図</title>
+<meta name="theme-color" content="#F6AB00">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Poppins:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="gran-os-base.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#">
+    <svg class="mark" viewBox="0 0 192 192" aria-hidden="true"><g fill="#F6AB00">
+      <rect x="0" y="0" width="192" height="44" rx="6"></rect>
+      <rect x="0" y="0" width="44" height="192" rx="6"></rect>
+      <rect x="70" y="74" width="122" height="44" rx="6"></rect>
+      <rect x="70" y="148" width="122" height="44" rx="6"></rect>
+      <rect x="70" y="74" width="46" height="118"></rect>
+    </g></svg>
+    <span><span class="en">GRANHOUSE</span><span class="jp">配置図</span></span>
+  </a>
+  <nav class="nav" aria-label="ページ">
+    <a href="index.html" id="to3d">3D</a>
+    <a href="plan.html" class="active" aria-current="page">配置図</a>
+  </nav>
+  <div class="sync"><select class="sitesel" id="sitesel" aria-label="敷地を選ぶ" hidden></select></div>
+</header>
+
+<main class="app">
+  <section class="card stage-card" id="stagecard" aria-label="配置図">
+    <div class="stage plan-stage" id="stage">
+      <canvas id="cv" aria-label="配置図。指やマウスで建物の外周を描きます"></canvas>
+      <div class="load" id="load">配置図を用意しています…</div>
+      <div class="hud-tl">
+        <div class="glass pill accent"><span class="k">建築面積</span><span class="v" id="barea">-</span></div>
+        <div class="glass pill"><span class="k">建ぺい率</span><span class="v" id="bratio">-</span></div>
+      </div>
+      <div class="glass hint" id="hint" aria-live="polite">外周を1本ずつ描いてください。描き始めの点に戻ると閉じます</div>
+      <div class="glass dock">
+        <div class="selrow" id="selrow" hidden>
+          <span class="selk" id="selk">-</span>
+          <div class="stepper"><button type="button" id="fdown" aria-label="1階低くする">−</button><b id="fval">-</b><button type="button" id="fup" aria-label="1階高くする">＋</button></div>
+          <button type="button" class="ib" id="del">消す</button>
+        </div>
+        <div class="topline">
+          <div class="seasons tools3" role="group" aria-label="道具">
+            <button type="button" class="on" data-mode="draw">描く</button><button type="button" data-mode="edit">直す</button><button type="button" data-mode="win">LDKの窓</button><button type="button" data-mode="pan">動かす</button>
+          </div>
+          <div class="icons">
+            <button type="button" class="ib" id="close" title="外周を閉じる">閉じる</button>
+            <button type="button" class="ib" id="undo" aria-label="1つ戻す" title="1つ戻す"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+            <button type="button" class="ib" id="fit" aria-label="敷地に合わせる" title="敷地に合わせる"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="phead">
+    <div>
+      <div class="kicker">Site plan</div>
+      <div class="title"><span class="big" aria-hidden="true">Plan</span><h1 id="sitename">配置図</h1></div>
+    </div>
+    <div class="sub">建物の外周を手で描くと、直線と角にそろえて、3Dの日照計算に入ります。<a href="index.html" id="to3d2" class="btn btn-sm">3Dで日当たりを見る</a></div>
+  </div>
+
+  <section class="tools">
+    <div class="card">
+      <h2>描いた建物の日当たり</h2>
+      <p class="lead">南の庭（建物より南の敷地）と、1階LDKの窓（床から1.2m）に日が当たる時間です。窓の位置は「LDKの窓」で辺を押して決められます（決めないときは、いちばん大きい建物の南の辺のまん中）。</p>
+      <table class="cmp" id="cmp" hidden>
+        <thead><tr><th></th><th>冬至</th><th>春分</th><th>夏至</th></tr></thead>
+        <tbody id="cmpb"></tbody>
+      </table>
+      <p class="tip" id="cmptip">建物を描くと、ここに出ます。</p>
+    </div>
+    <div class="card">
+      <h2>描き方の設定</h2>
+      <p class="lead">設定はこの端末に残ります。変えると、次に描く線から使われます。</p>
+      <div class="setgrid">
+        <span class="sk">直線に直す</span>
+        <div class="seg" role="group" aria-label="直線に直す"><button type="button" data-set="straight" data-val="1">直す</button><button type="button" data-set="straight" data-val="0">手描きのまま</button></div>
+        <span class="sk">直線にする強さ</span>
+        <div class="seg" role="group" aria-label="直線にする強さ"><button type="button" data-set="strength" data-val="6">弱い</button><button type="button" data-set="strength" data-val="12">ふつう</button><button type="button" data-set="strength" data-val="22">強い</button></div>
+        <span class="sk">角度をそろえる</span>
+        <div class="seg" role="group" aria-label="角度をそろえる"><button type="button" data-set="step" data-val="90">直角だけ</button><button type="button" data-set="step" data-val="45">45°も</button><button type="button" data-set="step" data-val="0">そろえない</button></div>
+        <span class="sk">マス目に寄せる</span>
+        <div class="seg" role="group" aria-label="マス目に寄せる"><button type="button" data-set="grid" data-val="0.91">910</button><button type="button" data-set="grid" data-val="0.455">455</button><button type="button" data-set="grid" data-val="1">1000</button><button type="button" data-set="grid" data-val="0">寄せない</button></div>
+        <span class="sk">自動で閉じる</span>
+        <div class="seg" role="group" aria-label="自動で閉じる距離"><button type="button" data-set="close" data-val="0">しない</button><button type="button" data-set="close" data-val="30">近いとき</button><button type="button" data-set="close" data-val="60">少し離れていても</button></div>
+        <span class="sk">境界から50cmの線</span>
+        <div class="seg" role="group" aria-label="境界から50cmの線"><button type="button" data-set="setback" data-val="1">出す</button><button type="button" data-set="setback" data-val="0">出さない</button></div>
+      </div>
+      <p class="tip">マス目の 910 は尺モジュール（910mm）、455 はその半分。辺の長さは mm で出ます。境界から50cmの線は、民法で建物を離す目安です。</p>
+    </div>
+  </section>
+
+  <section class="card about">
+    <ul class="notes">
+      <li>描く：外周を1本ずつ（一筆でぐるっとでも）描きます。前の線の終わりにつながり、描き始めの点に戻ると閉じます。途中でやめるときは「閉じる」</li>
+      <li>直す：角の点を引っぱると動き、辺を引っぱると辺ごと平行に動きます。建物の中を引っぱると建物ごと動きます。建物を押すと階数を変えられます</li>
+      <li>2本の指（マウスはホイール）で寄る・引く。「動かす」にすると1本の指で図をずらせます</li>
+      <li>高さは 平屋 軒3.3m・2階 軒6.2m に、屋根の平均 1.0m を足して計算します。描いた形はこの端末に残り、3Dの「計画の建物」の「配置図の形」で見られます</li>
+      <li id="lotnote">-</li>
+    </ul>
+  </section>
+</main>
+<script src="js/sun.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/plan.js"></script>
+</body>
+</html>

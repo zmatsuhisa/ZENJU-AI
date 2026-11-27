@@ -182,7 +182,7 @@ function buildSite(data, key) {
 }
 
 // ---------- 日照の計算 ----------
-const occAll = () => plan.f ? OCC.concat([planOcc()]) : OCC;
+const occAll = () => plan.f === 3 ? OCC.concat(drawnBldgs().map(b => S.occluder(b.p, b.h))) : plan.f ? OCC.concat([planOcc()]) : OCC;
 const ramp = [[32, 48, 94], [61, 111, 176], [95, 179, 161], [243, 211, 74], [240, 132, 30]];
 const col = t => { t = Math.max(0, Math.min(1, t)) * (ramp.length - 1); const i = Math.min(ramp.length - 2, Math.floor(t)), f = t - i; return ramp[i].map((a, k) => Math.round(a + (ramp[i + 1][k] - a) * f)); };
 const cv = document.createElement('canvas'); const heatTex = new THREE.CanvasTexture(cv); heatTex.magFilter = THREE.NearestFilter; heatTex.encoding = THREE.sRGBEncoding;
@@ -192,8 +192,8 @@ function drawHeat(ds) {
   if (heatFor === ds || !LOT) return; heatFor = ds;
   const GX = Math.ceil(lotBox.x1 - lotBox.x0), GZ = Math.ceil(lotBox.z1 - lotBox.z0); cv.width = GX; cv.height = GZ; const pts = [];
   for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) pts.push([lotBox.x0 + (i + .5) * (lotBox.x1 - lotBox.x0) / GX, lotBox.z0 + (j + .5) * (lotBox.z1 - lotBox.z0) / GZ]);
-  const box = plan.f ? planBox() : null;
-  const ins = pts.map(p => S.inPoly(p[0], p[1], LOT) && !(box && S.inPoly(p[0], p[1], box))), h = S.sunHours(ds, pts, occAll(), LAT, LON), hi = h.filter((v, k) => ins[k]);
+  const boxes = plan.f === 3 ? drawnBldgs().map(b => b.p) : plan.f ? [planBox()] : [];
+  const ins = pts.map(p => S.inPoly(p[0], p[1], LOT) && !boxes.some(b => S.inPoly(p[0], p[1], b))), h = S.sunHours(ds, pts, occAll(), LAT, LON), hi = h.filter((v, k) => ins[k]);
   const mn = Math.min(...hi), mx = Math.max(...hi), g = cv.getContext('2d'), img = g.createImageData(GX, GZ);
   h.forEach((v, k) => img.data.set([...col(mx > mn ? (v - mn) / (mx - mn) : 1), ins[k] ? 255 : 0], k * 4)); g.putImageData(img, 0, 0); heatTex.dispose(); heatTex.image = cv; heatTex.needsUpdate = true;
   $('lmin').textContent = mn.toFixed(1) + 'h'; $('lmax').textContent = mx.toFixed(1) + 'h';
@@ -217,7 +217,7 @@ function dayInfo(ds) {
 function centerHours() {
   if (!LOT) return; const ds = curDay();
   let v, k1, k2;
-  if (plan.f) { const st = S.planStats(ds, planArgs(), LOT, OCC, LAT, LON); v = st.garden; k1 = '南の庭の日照'; k2 = '南の庭の日照（平均）'; }
+  if (plan.f) { const st = plan.f === 3 ? drawnStats(ds) : S.planStats(ds, planArgs(), LOT, OCC, LAT, LON); v = st.garden; k1 = '南の庭の日照'; k2 = '南の庭の日照（平均）'; }
   else { v = S.sunHours(ds, [[lotC.x, lotC.z]], OCC, LAT, LON)[0]; k1 = '敷地の日照'; k2 = '敷地中央の日照'; }
   const t = v == null ? '-' : v.toFixed(1);
   $('centerk').textContent = k1; $('center2k').textContent = k2;
@@ -340,9 +340,20 @@ const plan = { f: 0, angle: 0, u: 0, n: 0, size: { 1: { w: 12.7, d: 9.1 }, 2: { 
 let frame = null;
 const toUV = (x, z) => { const a = plan.angle * R, c = Math.cos(a), s = Math.sin(a); return [x * c + z * s, -x * s + z * c]; };
 const toXZ = (u, v) => { const a = plan.angle * R, c = Math.cos(a), s = Math.sin(a); return [u * c - v * s, u * s + v * c]; };
+// 配置図で描いた建物（plan.html が localStorage に残したもの）
+let DRAWN = { bldgs: [], win: null };
+const drawnBldgs = () => DRAWN.bldgs.map(b => ({ p: b.p, h: S.drawHeight(b.f), f: b.f }));
+const drawnStats = ds => S.polyStats(ds, drawnBldgs(), DRAWN.win, LOT, OCC, LAT, LON, plan.angle);
+function loadDrawn() {
+  DRAWN = store.get('gos-sun-draw-' + SITE) || { bldgs: [], win: null };
+  const n = DRAWN.bldgs.length;
+  $('drawnote').textContent = n ? `配置図に描いた建物：${n}棟（建築面積 ${DRAWN.bldgs.reduce((s, b) => s + S.polyArea(b.p), 0).toFixed(1)}㎡）` : '配置図にはまだ建物が描かれていません。';
+  document.querySelector('[data-pf="3"]').disabled = !n;
+  if (!n && plan.f === 3) plan.f = 0;
+}
 // f の大きさで敷地からはみ出さない位置にした中心（plan の値は変えない）
 function planArgs(f) {
-  f = f || plan.f || 2; const { w, d } = plan.size[f];
+  f = (f && f < 3) ? f : (plan.f && plan.f < 3 ? plan.f : 2); const { w, d } = plan.size[f];
   const u = Math.max(frame.u0 + w / 2, Math.min(frame.u1 - w / 2, plan.u)), n = Math.max(frame.v0, Math.min(frame.v1 - d, plan.n));
   const [cx, cz] = toXZ(u, n + d / 2);
   return { cx, cz, w, d, angle: plan.angle, floors: f };
@@ -360,20 +371,21 @@ function initPlan() {
   plan.u = (frame.u0 + frame.u1) / 2; plan.n = frame.v0 + 1; plan.f = 0;
   const saved = store.get('gos-sun-plan-' + SITE);
   if (saved && saved.size) Object.assign(plan, { f: saved.f, u: saved.u, n: saved.n, size: saved.size });
+  loadDrawn();
   $('pu').min = frame.u0.toFixed(1); $('pu').max = frame.u1.toFixed(1);
   $('pn').min = 0; $('pn').max = Math.max(1, Dp - 3).toFixed(1);
   syncPlanUI(); drawPlan(); later('cmp', comparePlans, 400);
 }
 function clampPlan() {
-  const { w, d } = plan.size[plan.f || 2];
+  const { w, d } = plan.size[plan.f === 1 ? 1 : 2];
   plan.u = Math.max(frame.u0 + w / 2, Math.min(frame.u1 - w / 2, plan.u));
   plan.n = Math.max(frame.v0, Math.min(frame.v1 - d, plan.n));
 }
 function syncPlanUI() {
   document.querySelectorAll('[data-pf]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.pf === plan.f));
   $('planb').setAttribute('aria-pressed', plan.f > 0);
-  $('psl').setAttribute('aria-disabled', plan.f === 0);
-  const sz = plan.size[plan.f || 2];
+  $('psl').setAttribute('aria-disabled', plan.f === 0 || plan.f === 3);
+  const sz = plan.size[plan.f === 1 ? 1 : 2];
   $('pw').value = sz.w; $('pd').value = sz.d; $('pu').value = plan.u; $('pn').value = plan.n - frame.v0;
   $('pwo').textContent = sz.w.toFixed(1) + 'm'; $('pdo').textContent = sz.d.toFixed(1) + 'm';
   const off = plan.u - (frame.u0 + frame.u1) / 2;
@@ -384,6 +396,7 @@ function drawPlan() {
   if (planG) { siteG.remove(planG); disposeTree(planG); planG = null; }
   if (!plan.f) return;
   planG = new THREE.Group(); siteG.add(planG);
+  if (plan.f === 3) { drawDrawn(); return; }
   const a = planArgs(), eave = S.planHeight(a.floors, a.d) - a.d / 2 * .45 / 2;
   const box = planBox();
   const walls = prism(box, eave); const wm = new THREE.Mesh(walls, new THREE.MeshStandardMaterial({ color: 0xfbf7f0, roughness: .8 })); wm.castShadow = wm.receiveShadow = true; wm.userData.plan = true; planG.add(wm);
@@ -398,6 +411,17 @@ function drawPlan() {
   win.position.set(a.cx - s * (a.d / 2 + .05), 1.2, a.cz + c * (a.d / 2 + .05)); win.rotation.y = -a.angle * R; planG.add(win);
   label(planG, 'LDK', a.cx - s * (a.d / 2 + .6), a.cz + c * (a.d / 2 + .6), 2.2, 3);
 }
+// 描いた形：壁を軒まで、屋根は軒の上に平均1.0mの厚みで（計算と同じ高さ）
+function drawDrawn() {
+  drawnBldgs().forEach(b => {
+    const eave = b.h - 1;
+    const w = prism(b.p, eave); const wm = new THREE.Mesh(w, new THREE.MeshStandardMaterial({ color: 0xfbf7f0, roughness: .8 })); wm.castShadow = wm.receiveShadow = true; planG.add(wm);
+    planG.add(new THREE.LineSegments(new THREE.EdgesGeometry(w), new THREE.LineBasicMaterial({ color: 0xf7890a })));
+    const r = prism(b.p, 1); r.translate(0, eave, 0); const rm = new THREE.Mesh(r, new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: .55 })); rm.castShadow = rm.receiveShadow = true; planG.add(rm);
+  });
+  const st = DRAWN.win || S.autoWindow(drawnBldgs(), plan.angle);
+  if (st) { const m = new THREE.Mesh(new THREE.SphereGeometry(.35, 16, 8), new THREE.MeshBasicMaterial({ color: 0xf7890a, toneMapped: false })); m.position.set(st[0], 1.2, st[1]); planG.add(m); label(planG, 'LDK', st[0], st[1], 2.2, 3); }
+}
 function planChanged(calc) {
   clampPlan(); syncPlanUI(); drawPlan(); heatFor = ''; if (heat.visible) drawHeat(curDay());
   store.set('gos-sun-plan-' + SITE, { f: plan.f, u: plan.u, n: plan.n, size: plan.size });
@@ -405,7 +429,7 @@ function planChanged(calc) {
 }
 document.querySelectorAll('[data-pf]').forEach(b => b.addEventListener('click', () => { plan.f = +b.dataset.pf; planChanged(true); }));
 $('planb').addEventListener('click', () => { plan.f = plan.f ? 0 : 2; planChanged(true); if (plan.f && curView === 'town') setView('bird'); });
-[['pw', v => plan.size[plan.f || 2].w = v], ['pd', v => plan.size[plan.f || 2].d = v], ['pu', v => plan.u = v], ['pn', v => plan.n = frame.v0 + v]].forEach(([id, fn]) => {
+[['pw', v => plan.size[plan.f === 1 ? 1 : 2].w = v], ['pd', v => plan.size[plan.f === 1 ? 1 : 2].d = v], ['pu', v => plan.u = v], ['pn', v => plan.n = frame.v0 + v]].forEach(([id, fn]) => {
   $(id).addEventListener('input', e => { fn(+e.target.value); planChanged(false); later('calc', () => planChanged(true), 250); });
 });
 // 平屋と2階建てを、同じ位置（北の境界からの距離・東西の位置）で比べる
@@ -414,15 +438,15 @@ function comparePlans() {
   if (!LOT) return; const run = ++cmpRun;
   $('cmp').hidden = false;
   const days = [['冬至', YEAR + '-12-22'], ['春分', YEAR + '-03-20'], ['夏至', YEAR + '-06-21']];
-  const rows = [[1, '平屋'], [2, '2階建て']];
+  const rows = [[1, '平屋'], [2, '2階建て']].concat(DRAWN.bldgs.length ? [[3, '配置図の形']] : []);
   const res = {}; const jobs = []; rows.forEach(([f]) => days.forEach(([, ds]) => jobs.push([f, ds])));
   $('cmpb').innerHTML = '<tr><td colspan="4" class="busy">計算しています…</td></tr>';
   const step = () => {
     if (run !== cmpRun) return;
     const job = jobs.shift();
-    if (job) { const [f, ds] = job; res[f + ds] = S.planStats(ds, planArgs(f), LOT, OCC, LAT, LON); setTimeout(step, 0); return; }
+    if (job) { const [f, ds] = job; res[f + ds] = f === 3 ? drawnStats(ds) : S.planStats(ds, planArgs(f), LOT, OCC, LAT, LON); setTimeout(step, 0); return; }
     const td = v => v == null ? '<td>-</td>' : `<td>${v.toFixed(1)}h</td>`;
-    const body = [['南の庭（平均）', 'garden'], ['1階LDKの窓', 'ldk']].map(([name, k]) => `<tr class="grp"><th colspan="4">${name}</th></tr>` + rows.map(([f, n]) => `<tr class="${plan.f === f ? 'on' : ''}"><td>${n}<span class="small muted">（${plan.size[f].w.toFixed(1)}×${plan.size[f].d.toFixed(1)}m）</span></td>${days.map(([, ds]) => td(res[f + ds][k])).join('')}</tr>`).join('')).join('');
+    const body = [['南の庭（平均）', 'garden'], ['1階LDKの窓', 'ldk']].map(([name, k]) => `<tr class="grp"><th colspan="4">${name}</th></tr>` + rows.map(([f, n]) => `<tr class="${plan.f === f ? 'on' : ''}"><td>${n}<span class="small muted">（${f === 3 ? DRAWN.bldgs.reduce((s, b) => s + S.polyArea(b.p), 0).toFixed(1) + '㎡' : plan.size[f].w.toFixed(1) + '×' + plan.size[f].d.toFixed(1) + 'm'}）</span></td>${days.map(([, ds]) => td(res[f + ds][k])).join('')}</tr>`).join('')).join('');
     $('cmpb').innerHTML = body;
     const g1 = res[1 + days[0][1]], g2 = res[2 + days[0][1]];
     $('cmptip').textContent = g1.garden != null && g2.garden != null
@@ -438,7 +462,7 @@ let down = null, drag = null;
 function setRay(e) { const r = rnd.domElement.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(ndc, cam); }
 rnd.domElement.addEventListener('pointerdown', e => {
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
-  if (!planG) return;
+  if (!planG || plan.f === 3) return;
   setRay(e); const hit = ray.intersectObjects(planG.children.filter(c => c.userData.plan))[0];
   if (hit && ray.ray.intersectPlane(gplane, hitP)) { const [u, v] = toUV(hitP.x, hitP.z); drag = { du: plan.u - u, dn: plan.n - v }; orbit.enabled = false; rnd.domElement.setPointerCapture(e.pointerId); }
 });
@@ -459,6 +483,8 @@ async function loadSite(key) {
   try {
     const r = await fetch('sites/' + encodeURIComponent(key) + '.json'); if (!r.ok) throw new Error(r.status);
     buildSite(await r.json(), key);
+    store.set('gos-sun-site', key);
+    ['toplan', 'toplan2'].forEach(id => $(id).href = 'plan.html?site=' + encodeURIComponent(key));
     try { const u = new URL(location.href); u.searchParams.set('site', key); history.replaceState(null, '', u); } catch (e) {}
   } catch (e) {
     console.error(e);
@@ -470,6 +496,7 @@ async function loadSite(key) {
   let list = [];
   try { list = await (await fetch('sites/index.json')).json(); } catch (e) {}
   let key = null; try { key = new URLSearchParams(location.search).get('site'); } catch (e) {}
+  if (!key || !list.some(s => s.key === key)) key = store.get('gos-sun-site');
   if (!key || !list.some(s => s.key === key)) key = list.length ? list[0].key : key;
   if (list.length > 1) {
     const sel = $('sitesel'); sel.hidden = false; $('srcl').hidden = true;
@@ -480,6 +507,11 @@ async function loadSite(key) {
   loadSite(key);
 })();
 fixedNote();
+// 配置図で描き直したら（別のタブや、戻ってきたとき）読み直す
+function drawnChanged() { if (!LOT) return; const before = JSON.stringify(DRAWN); loadDrawn(); if (JSON.stringify(DRAWN) !== before) { syncPlanUI(); planChanged(true); } }
+addEventListener('storage', e => { if (e.key === 'gos-sun-draw-' + SITE) drawnChanged(); });
+addEventListener('pageshow', drawnChanged);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) drawnChanged(); });
 
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function loop(t) { requestAnimationFrame(loop); if (playing && t - last > (reduce ? 200 : 40)) { last = t; let m = +$('time').value + 5; if (m > 1260) m = 300; $('time').value = m; update(); } orbit.update(); sky.position.copy(cam.position); rnd.render(scene, cam); }
