@@ -168,6 +168,27 @@
     return { P: move(P, m), move: m };
   }
 
+  // ---------- 角からの寸法を「境界線に沿って」測る（追い寸法） ----------
+  // 敷地の角 lv から、2本の境界（手前の辺 lv-1・先の辺 lv）それぞれの上を、角から離れる向きに進む単位ベクトル
+  function cornerDirs(lot, lv) {
+    const n = lot.length, c = lot[lv], a = lot[(lv - 1 + n) % n], b = lot[(lv + 1) % n];
+    const u = (p) => { const L = dist(p, c) || 1e-9; return [(p[0] - c[0]) / L, (p[1] - c[1]) / L]; };
+    return [u(a), u(b)];
+  }
+  // 建物の角 p を、それぞれの境界線に直角に下ろした点までの、角からの長さ（境界線に沿って）
+  function cornerAlong(P, bv, lot, lv) { const c = lot[lv], q = P[bv]; return cornerDirs(lot, lv).map(u => (q[0] - c[0]) * u[0] + (q[1] - c[1]) * u[1]); }
+  // 境界線に沿って t1・t2 の点から直角に下ろした線が交わる所（建物の角の位置）
+  function cornerPointAlong(lot, lv, t1, t2) {
+    const [u1, u2] = cornerDirs(lot, lv), c = lot[lv], det = u1[0] * u2[1] - u1[1] * u2[0];
+    if (Math.abs(det) < 1e-6) return null;
+    const q = [(t1 * u2[1] - t2 * u1[1]) / det, (u1[0] * t2 - u2[0] * t1) / det];
+    return [c[0] + q[0], c[1] + q[1]];
+  }
+  function placeCornerAlong(P, bv, lot, lv, t1, t2) {
+    const x = cornerPointAlong(lot, lv, t1, t2); if (!x) return null;
+    const m = [x[0] - P[bv][0], x[1] - P[bv][1]]; return { P: move(P, m), move: m };
+  }
+
   // ---------- 決めた寸法を守る ----------
   // dims: [{k:'e', be:建物の辺, le:敷地の辺, d:距離 m, par:平行も守るか} | {k:'c', bv:建物の角, lv:敷地の角, d1, d2}]
   // 寸法の直線（敷地の辺 le を内側へ d ずらした線）
@@ -190,14 +211,14 @@
         if (a.k !== 'e' || b.k !== 'e' || a.par === false || b.par === false || (a.be + 1) % n !== b.be) return;
         const la = dimLine(lot, a.le, a.d), lb = dimLine(lot, b.le, b.d), x = cross(la.o, la.dir, lb.o, lb.dir); if (x) Q[b.be] = x;
       }));
-      dims.forEach(dm => { if (dm.k === 'c' && Q[dm.bv] != null) { const x = cornerPoint(lot, dm.lv, dm.d1, dm.d2); if (x) Q[dm.bv] = x; } });
+      dims.forEach(dm => { if (dm.k === 'c' && Q[dm.bv] != null) { const x = dm.m === 'a' ? cornerPointAlong(lot, dm.lv, dm.d1, dm.d2) : cornerPoint(lot, dm.lv, dm.d1, dm.d2); if (x) Q[dm.bv] = x; } });
     }
     return Q;
   }
   // 建物ごと動かすとき：寸法で決まった向きの動きを取り除く（決まっていない向きにだけ動く）
   function allowedMove(t, dims, lot) {
     const N = [];
-    (dims || []).forEach(dm => { if (dm.k === 'e') N.push(inwardNormal(lot, dm.le)); else cornerEdges(lot, dm.lv).forEach(e => N.push(inwardNormal(lot, e))); });
+    (dims || []).forEach(dm => { if (dm.k === 'e') N.push(inwardNormal(lot, dm.le)); else if (dm.m === 'a') cornerDirs(lot, dm.lv).forEach(u => N.push(u)); else cornerEdges(lot, dm.lv).forEach(e => N.push(inwardNormal(lot, e))); });
     if (!N.length) return t;
     const n1 = N[0];
     if (N.some(n => Math.abs(n1[0] * n[1] - n1[1] * n[0]) > 1e-3)) return [0, 0]; // 2つの向きが決まっている
@@ -225,5 +246,5 @@
     return out;
   }
 
-  return { dimLine, cornerPoint, keepDims, allowedMove, dimsAfterInsert, dimsAfterDelete, inwardNormal, offsetFrom, rotate, alignEdge, edgeGap, placeEdge, cornerEdges, cornerGap, placeCorner, R, dist, toUV, toXZ, simplify, straighten, snapGrid, area, inPoly, nearestOnSeg, inset };
+  return { cornerDirs, cornerAlong, cornerPointAlong, placeCornerAlong, dimLine, cornerPoint, keepDims, allowedMove, dimsAfterInsert, dimsAfterDelete, inwardNormal, offsetFrom, rotate, alignEdge, edgeGap, placeEdge, cornerEdges, cornerGap, placeCorner, R, dist, toUV, toXZ, simplify, straighten, snapGrid, area, inPoly, nearestOnSeg, inset };
 });

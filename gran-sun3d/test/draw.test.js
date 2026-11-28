@@ -135,3 +135,18 @@ test('建物の大きさ：総2階 9.1×7.28 は 1階 約20坪・延べ 約40坪
   assert.ok(Math.abs(s.neigh['南'].d - (28 - 8.38)) < 1e-9, '南の家まで');
   assert.ok(Math.abs(s.neigh['南'].shadow - 6.4 / Math.tan(31.3 * Math.PI / 180)) < 1e-9, '冬至の正午の影の長さ');
 });
+
+test('寸法：角からは境界線に沿って測る（角が直角でない土地でも）', () => {
+  const lot = [[0, 0], [20, 2], [19, 25], [-2, 22]]; // 北西の角がゆがんだ土地
+  const P = [[4, 4], [12, 4], [12, 10], [4, 10]];
+  // 北西の角 lot[0]：手前の辺は西の境界（lot[3]→lot[0]）、先の辺は北の境界（lot[0]→lot[1]）
+  const r = D.placeCornerAlong(P, 0, lot, 0, 0.9, 1.0); // 西の境界に沿って 900、北の境界に沿って 1,000
+  const g = D.cornerAlong(r.P, 0, lot, 0);
+  assert.ok(Math.abs(g[0] - .9) < 1e-9 && Math.abs(g[1] - 1) < 1e-9, `沿った長さ ${g}`);
+  // 北の境界の上、角から 1,000 の点から直角に下ろした線の上に建物の角がある
+  const [u1, u2] = D.cornerDirs(lot, 0), f = [lot[0][0] + u2[0], lot[0][1] + u2[1]];
+  assert.ok(Math.abs((r.P[0][0] - f[0]) * u2[0] + (r.P[0][1] - f[1]) * u2[1]) < 1e-9);
+  // 守る：建物ごと動かそうとしても動かない
+  const t = D.allowedMove([1, 1], [{ k: 'c', bv: 0, lv: 0, d1: .9, d2: 1, m: 'a' }], lot);
+  assert.ok(Math.hypot(t[0], t[1]) < 1e-9);
+});

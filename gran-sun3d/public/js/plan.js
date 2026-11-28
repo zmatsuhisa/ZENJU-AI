@@ -50,7 +50,7 @@ function loadSiteData(data, key) {
   loadHeights();
   lotArea = D.area(LOT); setbackLine = D.inset(LOT, .5);
   DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; cur = null; sel = -1; hist.length = 0; fut.length = 0; closeDim();
-  DRAWN.bldgs.forEach(b => (b.dims || []).forEach(d => { if (d.k === 'e' && d.d == null) { d.d = D.edgeGap(b.p, d.be, LOT, d.le); d.par = true; } if (d.k === 'c' && d.d1 == null) [d.d1, d.d2] = D.cornerGap(b.p, d.bv, LOT, d.lv); }));
+  DRAWN.bldgs.forEach(b => (b.dims || []).forEach(d => { if (d.k === 'e' && d.d == null) { d.d = D.edgeGap(b.p, d.be, LOT, d.le); d.par = true; } if (d.k === 'c' && d.m !== 'a') { [d.d1, d.d2] = D.cornerAlong(b.p, d.bv, LOT, d.lv); d.m = 'a'; } }));
   $('sitename').textContent = (data.name || '敷地') + ' 配置図'; document.title = 'グランOS｜配置図 ' + (data.name || '');
   $('lotnote').textContent = (data.lotNote || '敷地の形は地図からの概算（測量図ではない）') + `。敷地 約${lotArea.toFixed(1)}㎡`;
   ['to3d', 'to3d2'].forEach(id => $(id).href = 'index.html?site=' + encodeURIComponent(key));
@@ -163,7 +163,9 @@ function dimLine(a, b, text) {
   [[x1, y1], [x2, y2]].forEach(([x, y]) => { g.beginPath(); g.moveTo(x - tx, y - ty); g.lineTo(x + tx, y + ty); g.stroke(); });
   // 数字は寸法線の横（線が短いときは少し離して）に置き、ほかの数字と重なりにくくする
   const off = (L < 50 ? 22 : 13) / view.s, ux = -(b[1] - a[1]) / (D.dist(a, b) || 1), uz = (b[0] - a[0]) / (D.dist(a, b) || 1);
-  label(text, [(a[0] + b[0]) / 2 + ux * off, (a[1] + b[1]) / 2 + uz * off], { size: 11, color: BLUE });
+  // 数字は敷地の中央から遠い側に置く（境界の外へ）
+  const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], cc = centroid(LOT), sg = (mid[0] - cc[0]) * ux + (mid[1] - cc[1]) * uz < 0 ? -1 : 1;
+  label(text, [(a[0] + b[0]) / 2 + ux * off * sg, (a[1] + b[1]) / 2 + uz * off * sg], { size: 11, color: BLUE });
 }
 function drawDims() {
   DRAWN.bldgs.forEach(b => (b.dims || []).forEach(dm => {
@@ -173,8 +175,20 @@ function drawDims() {
       dimLine([m[0] - n[0] * t, m[1] - n[1] * t], m, mm(t));
     }
     if (dm.k === 'c' && P[dm.bv] && LOT[dm.lv]) {
-      const p = P[dm.bv], gs = D.cornerGap(P, dm.bv, LOT, dm.lv);
-      D.cornerEdges(LOT, dm.lv).forEach((e, j) => { const n = D.inwardNormal(LOT, e); dimLine([p[0] - n[0] * gs[j], p[1] - n[1] * gs[j]], p, mm(gs[j])); });
+      const p = P[dm.bv], c = LOT[dm.lv];
+      if (dm.m === 'a') {
+        // 境界線に沿って：角から境界の上を測り（境界の少し外に寸法線）、そこから建物の角へ点線
+        const ts = D.cornerAlong(P, dm.bv, LOT, dm.lv), us = D.cornerDirs(LOT, dm.lv);
+        D.cornerEdges(LOT, dm.lv).forEach((e, j) => {
+          const n = D.inwardNormal(LOT, e), o = 16 / view.s, u = us[j], f = [c[0] + u[0] * ts[j], c[1] + u[1] * ts[j]];
+          dimLine([c[0] - n[0] * o, c[1] - n[1] * o], [f[0] - n[0] * o, f[1] - n[1] * o], mm(ts[j]));
+          const [x1, y1] = toS(f), [x2, y2] = toS(p); g.setLineDash([4, 4]); g.strokeStyle = BLUE; g.lineWidth = 1; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); g.setLineDash([]);
+          dot(f, BLUE, 3);
+        });
+      } else {
+        const gs = D.cornerGap(P, dm.bv, LOT, dm.lv);
+        D.cornerEdges(LOT, dm.lv).forEach((e, j) => { const n = D.inwardNormal(LOT, e); dimLine([p[0] - n[0] * gs[j], p[1] - n[1] * gs[j]], p, mm(gs[j])); });
+      }
     }
   }));
   if (mode !== 'dim') return;
@@ -518,29 +532,29 @@ function openDim() {
     $('dimk').innerHTML = `辺を${sideName(dimPick.l)}と平行にしました<small>境界からの距離を入れて「決める」</small>`;
     $('dl1').textContent = sideName(dimPick.l).replace('の境界', '') + 'から'; $('dv1').value = toMM(D.edgeGap(b.p, dimPick.i, LOT, dimPick.l)); $('dimin2').hidden = true;
   } else {
-    const [e1, e2] = D.cornerEdges(LOT, dimPick.l), gs = D.cornerGap(b.p, dimPick.i, LOT, dimPick.l);
-    $('dimk').innerHTML = `敷地の角から、2本の境界までの距離<small>角どうしはまっすぐ ${mm(D.dist(b.p[dimPick.i], LOT[dimPick.l]))}mm</small>`;
-    $('dl1').textContent = sideName(e1).replace('の境界', '') + 'から'; $('dv1').value = toMM(gs[0]);
-    $('dl2').textContent = sideName(e2).replace('の境界', '') + 'から'; $('dv2').value = toMM(gs[1]); $('dimin2').hidden = false;
+    const [e1, e2] = D.cornerEdges(LOT, dimPick.l), ts = D.cornerAlong(b.p, dimPick.i, LOT, dimPick.l);
+    $('dimk').innerHTML = `敷地の角から、境界線に沿って測ります<small>角どうしはまっすぐ ${mm(D.dist(b.p[dimPick.i], LOT[dimPick.l]))}mm</small>`;
+    $('dl1').textContent = sideName(e1) + 'に沿って'; $('dv1').value = toMM(ts[0]);
+    $('dl2').textContent = sideName(e2) + 'に沿って'; $('dv2').value = toMM(ts[1]); $('dimin2').hidden = false;
   }
   if (ex) { if (ex.k === 'e') $('dv1').value = toMM(ex.d); else { $('dv1').value = toMM(ex.d1); $('dv2').value = toMM(ex.d2); } }
   if (dimPick.k === 'e' && dimPick.par === false) $('dimk').innerHTML = `${sideName(dimPick.l)}から（向きは変えず、辺のまん中で測ります）<small>ほかの寸法を決めてあるので回しません</small>`;
   $('dimdel').hidden = !ex;
   $('dimrow').hidden = false; $('selrow').hidden = true;
-  showHint(dimPick.k === 'e' ? '境界からの距離を mm で入れて「決める」' : '2本の境界からの距離を mm で入れて「決める」'); draw();
+  showHint(dimPick.k === 'e' ? '境界からの距離を mm で入れて「決める」' : 'それぞれの境界線に沿った、角からの長さを mm で入れて「決める」'); draw();
   setTimeout(() => { try { $('dv1').focus({ preventScroll: true }); $('dv1').select(); } catch (e) {} }, 50);
 }
 function applyDim() {
   if (!dimPick || dimPick.l == null) return;
   const b = DRAWN.bldgs[dimPick.b], t1 = $('dv1').value, t2 = $('dv2').value, v1 = +t1 / 1000, v2 = +t2 / 1000;
   if (t1 === '' || !isFinite(v1) || (dimPick.k === 'c' && (t2 === '' || !isFinite(v2)))) { showHint('距離を mm の数字で入れてください'); return; }
-  const r = dimPick.k === 'e' ? D.placeEdge(b.p, dimPick.i, LOT, dimPick.l, v1) : D.placeCorner(b.p, dimPick.i, LOT, dimPick.l, v1, v2);
+  const r = dimPick.k === 'e' ? D.placeEdge(b.p, dimPick.i, LOT, dimPick.l, v1) : D.placeCornerAlong(b.p, dimPick.i, LOT, dimPick.l, v1, v2);
   if (!r) { showHint('この角では決められません（2本の境界が一直線です）'); return; }
   const pk = dimPick;
   const others = (b.dims || []).filter(d => pk.k === 'e' ? !(d.k === 'e' && (d.be === pk.i || d.le === pk.l)) : !(d.k === 'c' && (d.bv === pk.i || d.lv === pk.l)));
   // ほかの寸法を守れる向きにだけ建物ごと動かし、残りは形を合わせる
   moveB(b, D.allowedMove(r.move, others, LOT));
-  b.dims = others.concat([pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l, d: v1, par: pk.par !== false } : { k: 'c', bv: pk.i, lv: pk.l, d1: v1, d2: v2 }]);
+  b.dims = others.concat([pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l, d: v1, par: pk.par !== false } : { k: 'c', bv: pk.i, lv: pk.l, d1: v1, d2: v2, m: 'a' }]);
   b.p = D.keepDims(b.p, b.dims, LOT);
   save(); closeDim(); hud(); draw();
   showHint(outside(b.p) ? '動かしました。敷地からはみ出しています' : '寸法どおりに動かしました。この寸法は、あとで直しても守られます');
