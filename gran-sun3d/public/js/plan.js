@@ -43,6 +43,7 @@ function loadSiteData(data, key) {
   loadHeights();
   lotArea = D.area(LOT); setbackLine = D.inset(LOT, .5);
   DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; cur = null; sel = -1; hist.length = 0; fut.length = 0; closeDim();
+  DRAWN.bldgs.forEach(b => (b.dims || []).forEach(d => { if (d.k === 'e' && d.d == null) { d.d = D.edgeGap(b.p, d.be, LOT, d.le); d.par = true; } if (d.k === 'c' && d.d1 == null) [d.d1, d.d2] = D.cornerGap(b.p, d.bv, LOT, d.lv); }));
   $('sitename').textContent = (data.name || '敷地') + ' 配置図'; document.title = 'グランOS｜配置図 ' + (data.name || '');
   $('lotnote').textContent = (data.lotNote || '敷地の形は地図からの概算（測量図ではない）') + `。敷地 約${lotArea.toFixed(1)}㎡`;
   ['to3d', 'to3d2'].forEach(id => $(id).href = 'index.html?site=' + encodeURIComponent(key));
@@ -307,7 +308,7 @@ cv.addEventListener('pointerdown', e => {
   if (!h) { sel = -1; act = { pan: sp }; hud(); draw(); return; }
   const now = performance.now(), dbl = lastTap && now - lastTap.t < 380 && Math.hypot(sp[0] - lastTap.sp[0], sp[1] - lastTap.sp[1]) < 14; lastTap = { t: now, sp };
   if (dbl && (h.v != null || h.e != null)) { editVertex(h, w); lastTap = null; return; }
-  sel = h.b; act = Object.assign({ before: JSON.stringify({ DRAWN, cur }), start: w, orig: JSON.parse(JSON.stringify(DRAWN.bldgs[h.b].p)), moved: false, win: h.all && winOf(DRAWN.bldgs[h.b].p) ? DRAWN.win.slice() : null }, h); hud(); draw();
+  lockT = 0; sel = h.b; act = Object.assign({ before: JSON.stringify({ DRAWN, cur }), start: w, orig: JSON.parse(JSON.stringify(DRAWN.bldgs[h.b].p)), moved: false, win: h.all && winOf(DRAWN.bldgs[h.b].p) ? DRAWN.win.slice() : null }, h); hud(); draw();
 });
 cv.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return;
@@ -323,13 +324,15 @@ cv.addEventListener('pointermove', e => {
   if (act.pan) { view.x -= (sp[0] - act.pan[0]) / view.s; view.z -= (sp[1] - act.pan[1]) / view.s; act.pan = sp; draw(); return; }
   const P = DRAWN.bldgs[act.b].p, d = [w[0] - act.start[0], w[1] - act.start[1]];
   if (!act.moved && act.before) { hist.push(act.before); if (hist.length > 60) hist.shift(); fut.length = 0; }
-  if (act.v != null) P[act.v] = magnetPoint(snapP([act.orig[act.v][0] + d[0], act.orig[act.v][1] + d[1]]));
+  const B = DRAWN.bldgs[act.b];
+  if (act.v != null) { const want = magnetPoint(snapP([act.orig[act.v][0] + d[0], act.orig[act.v][1] + d[1]])); P[act.v] = want; B.p = D.keepDims(P, B.dims, LOT); if (D.dist(B.p[act.v], want) > .3) lockHint(); }
   else if (act.e != null) {
     const a = act.orig[act.e], c = act.orig[(act.e + 1) % P.length], L = D.dist(a, c), n = [(c[1] - a[1]) / L, -(c[0] - a[0]) / L];
     let t = d[0] * n[0] + d[1] * n[1]; if (SET.grid) t = Math.round(t / SET.grid) * SET.grid;
     t = magnetEdge(a, c, n, t);
     P[act.e] = [a[0] + n[0] * t, a[1] + n[1] * t]; P[(act.e + 1) % P.length] = [c[0] + n[0] * t, c[1] + n[1] * t];
-  } else { const s = snapDelta(d); act.orig.forEach((p, k) => P[k] = [p[0] + s[0], p[1] + s[1]]); if (act.win) DRAWN.win = [act.win[0] + s[0], act.win[1] + s[1]]; }
+    B.p = D.keepDims(P, B.dims, LOT); if (Math.abs(t) > .3 && D.dist(B.p[act.e], P[act.e]) > .3) lockHint();
+  } else { const s0 = snapDelta(d), s = D.allowedMove(s0, B.dims, LOT); if (Math.hypot(s0[0] - s[0], s0[1] - s[1]) > .3) lockHint(); act.orig.forEach((p, k) => P[k] = [p[0] + s[0], p[1] + s[1]]); if (act.win) DRAWN.win = [act.win[0] + s[0], act.win[1] + s[1]]; }
   act.moved = true; hud(); draw();
 });
 function up(e) {
@@ -345,7 +348,7 @@ cv.addEventListener('wheel', e => { e.preventDefault(); const sp = pos(e), befor
 document.addEventListener('keydown', e => {
   if (/INPUT|SELECT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) return;
   if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); $('redo').click(); return; }
-  if (sel >= 0 && !cur && /^Arrow/.test(e.key)) { e.preventDefault(); const st = SET.grid || .1, u = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key]; snapshot(); moveB(DRAWN.bldgs[sel], D.toXZ(u, ANG)); save(); hud(); draw(); return; }
+  if (sel >= 0 && !cur && /^Arrow/.test(e.key)) { e.preventDefault(); const st = SET.grid || .1, u = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key]; const bb = DRAWN.bldgs[sel], m = D.allowedMove(D.toXZ(u, ANG), bb.dims, LOT); if (Math.hypot(m[0], m[1]) < 1e-6) { showHint('寸法で位置を決めてあるので、この向きには動きません'); return; } snapshot(); moveB(bb, m); save(); hud(); draw(); return; }
   if (sel >= 0 && !cur && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); $('del').click(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); $('undo').click(); } if (e.key === 'Enter' && cur) closeCur(); if (e.key === 'Escape' && cur) { snapshot(); cur = null; hud(); draw(); } });
 
@@ -354,9 +357,14 @@ let lastTap = null;
 // 角を2回押す→角を消す（4つより多いとき）、辺を2回押す→押した所に角を足す。寸法は番号がずれるので消す
 function editVertex(h, w) {
   const b = DRAWN.bldgs[h.b]; snapshot();
-  if (h.v != null) { if (b.p.length <= 3) { hist.pop(); return showHint('角が3つより少なくなるので消せません'); } b.p.splice(h.v, 1); showHint('角を消しました'); }
-  else { const { q } = D.nearestOnSeg(w, b.p[h.e], b.p[(h.e + 1) % b.p.length]); b.p.splice(h.e + 1, 0, snapP(q)); showHint('角を足しました。引っぱって形を変えられます'); }
-  if (b.dims && b.dims.length) { b.dims = []; showHint('角の数が変わったので、決めた寸法を消しました'); }
+  if (h.v != null) {
+    if (b.p.length <= 3) { hist.pop(); return showHint('角が3つより少なくなるので消せません'); }
+    if ((b.dims || []).some(d => d.k === 'c' && d.bv === h.v)) { hist.pop(); return showHint('寸法を決めた角は消せません（寸法を外してから）'); }
+    const before = (b.dims || []).length; b.dims = D.dimsAfterDelete(b.dims, h.v, b.p.length); b.p.splice(h.v, 1);
+    showHint(b.dims.length < before ? '角を消しました。その角の辺に決めた寸法は外れました' : '角を消しました');
+  }
+  else { const { q } = D.nearestOnSeg(w, b.p[h.e], b.p[(h.e + 1) % b.p.length]); b.dims = D.dimsAfterInsert(b.dims, h.e); b.p.splice(h.e + 1, 0, snapP(q)); showHint('角を足しました。引っぱって形を変えられます'); }
+  b.p = D.keepDims(b.p, b.dims, LOT);
   sel = h.b; save(); hud(); draw();
 }
 // 境界線と50cmの線（吸い付く先）
@@ -435,18 +443,24 @@ function dimTap(w) {
     let best = null; LOT.forEach((a, k) => { const d = D.dist(D.nearestOnSeg(w, a, LOT[(k + 1) % LOT.length]).q, w); if (!best || d < best.d) best = { d, k }; });
     if (!best || best.d > tol) { showHint('敷地の境界線（緑の線）を押してください'); return; }
     dimPick.l = best.k; snapshot();
-    // 辺を境界と平行にする（窓もいっしょに回す）
+    // 辺を境界と平行にする（窓もいっしょに回す）。ほかの寸法があるときは回さず、辺のまん中で測る
+    const others = (b.dims || []).filter(d => !(d.k === 'e' && d.be === dimPick.i && d.le === dimPick.l));
     const own = winOf(b.p), a = b.p[dimPick.i], c = b.p[(dimPick.i + 1) % b.p.length], r = D.alignEdge(b.p, dimPick.i, LOT, dimPick.l);
-    b.p = r.P; if (own) DRAWN.win = D.rotate([DRAWN.win], [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], r.deg)[0];
-    save(); openDim(); return;
+    dimPick.par = true;
+    if (Math.abs(r.deg) > .05) {
+      if (others.length) dimPick.par = false;
+      else { b.p = r.P; if (own) DRAWN.win = D.rotate([DRAWN.win], [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], r.deg)[0]; save(); }
+    }
+    openDim(); return;
   }
   let best = null; LOT.forEach((p, k) => { const d = D.dist(p, w); if (!best || d < best.d) best = { d, k }; });
   if (!best || best.d > tol * 1.3) { showHint('敷地の角（緑の丸）を押してください'); return; }
   dimPick.l = best.k; snapshot(); openDim();
 }
 const toMM = m => Math.round(m * 100) * 10; // 10mm 単位
+function existingDim() { const b = DRAWN.bldgs[dimPick.b]; return (b.dims || []).find(d => dimPick.k === 'e' ? d.k === 'e' && d.be === dimPick.i && d.le === dimPick.l : d.k === 'c' && d.bv === dimPick.i && d.lv === dimPick.l); }
 function openDim() {
-  const b = DRAWN.bldgs[dimPick.b];
+  const b = DRAWN.bldgs[dimPick.b], ex = existingDim();
   if (dimPick.k === 'e') {
     $('dimk').innerHTML = `辺を${sideName(dimPick.l)}と平行にしました<small>境界からの距離を入れて「決める」</small>`;
     $('dl1').textContent = sideName(dimPick.l).replace('の境界', '') + 'から'; $('dv1').value = toMM(D.edgeGap(b.p, dimPick.i, LOT, dimPick.l)); $('dimin2').hidden = true;
@@ -456,6 +470,9 @@ function openDim() {
     $('dl1').textContent = sideName(e1).replace('の境界', '') + 'から'; $('dv1').value = toMM(gs[0]);
     $('dl2').textContent = sideName(e2).replace('の境界', '') + 'から'; $('dv2').value = toMM(gs[1]); $('dimin2').hidden = false;
   }
+  if (ex) { if (ex.k === 'e') $('dv1').value = toMM(ex.d); else { $('dv1').value = toMM(ex.d1); $('dv2').value = toMM(ex.d2); } }
+  if (dimPick.k === 'e' && dimPick.par === false) $('dimk').innerHTML = `${sideName(dimPick.l)}から（向きは変えず、辺のまん中で測ります）<small>ほかの寸法を決めてあるので回しません</small>`;
+  $('dimdel').hidden = !ex;
   $('dimrow').hidden = false; $('selrow').hidden = true;
   showHint(dimPick.k === 'e' ? '境界からの距離を mm で入れて「決める」' : '2本の境界からの距離を mm で入れて「決める」'); draw();
   setTimeout(() => { try { $('dv1').focus({ preventScroll: true }); $('dv1').select(); } catch (e) {} }, 50);
@@ -466,14 +483,18 @@ function applyDim() {
   if (t1 === '' || !isFinite(v1) || (dimPick.k === 'c' && (t2 === '' || !isFinite(v2)))) { showHint('距離を mm の数字で入れてください'); return; }
   const r = dimPick.k === 'e' ? D.placeEdge(b.p, dimPick.i, LOT, dimPick.l, v1) : D.placeCorner(b.p, dimPick.i, LOT, dimPick.l, v1, v2);
   if (!r) { showHint('この角では決められません（2本の境界が一直線です）'); return; }
-  moveB(b, r.move);
   const pk = dimPick;
-  b.dims = (b.dims || []).filter(d => pk.k === 'e' ? !(d.k === 'e' && (d.be === pk.i || d.le === pk.l)) : !(d.k === 'c' && (d.bv === pk.i || d.lv === pk.l)));
-  b.dims.push(pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l } : { k: 'c', bv: pk.i, lv: pk.l });
+  const others = (b.dims || []).filter(d => pk.k === 'e' ? !(d.k === 'e' && (d.be === pk.i || d.le === pk.l)) : !(d.k === 'c' && (d.bv === pk.i || d.lv === pk.l)));
+  // ほかの寸法を守れる向きにだけ建物ごと動かし、残りは形を合わせる
+  moveB(b, D.allowedMove(r.move, others, LOT));
+  b.dims = others.concat([pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l, d: v1, par: pk.par !== false } : { k: 'c', bv: pk.i, lv: pk.l, d1: v1, d2: v2 }]);
+  b.p = D.keepDims(b.p, b.dims, LOT);
   save(); closeDim(); hud(); draw();
-  showHint(outside(b.p) ? '動かしました。敷地からはみ出しています' : '寸法どおりに動かしました。ほかの辺や角も続けて決められます');
+  showHint(outside(b.p) ? '動かしました。敷地からはみ出しています' : '寸法どおりに動かしました。この寸法は、あとで直しても守られます');
 }
 $('dimok').addEventListener('click', applyDim);
+$('dimdel').addEventListener('click', () => { const ex = dimPick && existingDim(); if (!ex) return; snapshot(); const b = DRAWN.bldgs[dimPick.b]; b.dims = b.dims.filter(d => d !== ex); save(); closeDim(); hud(); draw(); showHint('寸法を外しました。自由に動かせます'); });
+let lockT = 0; function lockHint() { const now = performance.now(); if (now - lockT > 2500) { lockT = now; showHint('寸法で決めた所は動きません（寸法の道具で同じ所を押すと外せます）'); } }
 ['dv1', 'dv2'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyDim(); } }));
 $('dimx').addEventListener('click', () => { closeDim(); hud(); draw(); });
 
@@ -491,5 +512,5 @@ async function loadSite(key) {
   if (!key) { $('load').textContent = '敷地のデータがありません（sites/index.json）。'; return; }
   size(); loadSite(key);
 })();
-window.__plan = { applyDim, get dimPick() { return dimPick; }, get DRAWN() { return DRAWN; }, get cur() { return cur; }, view, finishStroke, toS, toW, setMode };
+window.__plan = { get LOT() { return LOT; }, applyDim, get dimPick() { return dimPick; }, get DRAWN() { return DRAWN; }, get cur() { return cur; }, view, finishStroke, toS, toW, setMode };
 })();

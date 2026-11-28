@@ -90,3 +90,35 @@ test('寸法：建物の角を、敷地の角から 北側1,100・西側1,500 �
   const g = D.cornerGap(r.P, 0, lot, 0);
   assert.ok(Math.abs(g[0] - 1.5) < 1e-9 && Math.abs(g[1] - 1.1) < 1e-9);
 });
+
+test('寸法を守る：北1,110を決めた建物は、建物ごと動かしても東西にだけ動く', () => {
+  const lot = [[0, 0], [20, 0], [20, 25], [0, 25]];
+  const dims = [{ k: 'e', be: 0, le: 0, d: 1.11 }];
+  const t = D.allowedMove([2, 3], dims, lot);
+  assert.ok(Math.abs(t[0] - 2) < 1e-9 && Math.abs(t[1]) < 1e-9);
+  const dims2 = dims.concat([{ k: 'e', be: 3, le: 3, d: 1.5 }]);
+  const t2 = D.allowedMove([2, 3], dims2, lot);
+  assert.ok(Math.abs(t2[0]) < 1e-9 && Math.abs(t2[1]) < 1e-9, '北と西を決めたら動かない');
+});
+
+test('寸法を守る：決めた辺の角を引っぱっても、辺は境界から 1,110 のまま', () => {
+  const lot = [[0, 0], [20, 3], [18, 25], [-1, 22]];
+  let P = [[3, 4], [12, 4], [12, 11], [3, 11]];
+  P = D.alignEdge(P, 0, lot, 0).P; P = D.placeEdge(P, 0, lot, 0, 1.11).P;
+  const dims = [{ k: 'e', be: 0, le: 0, d: 1.11 }];
+  P[1] = [P[1][0] + 1.5, P[1][1] - 2]; // 北東の角を引っぱる
+  const Q = D.keepDims(P, dims, lot), n = D.inwardNormal(lot, 0);
+  [Q[0], Q[1]].forEach(p => assert.ok(Math.abs(D.offsetFrom(p, lot[0], n) - 1.11) < 1e-9));
+});
+
+test('寸法を守る：角の寸法は、角を引っぱっても元の所に戻る。角を足しても寸法の番号が合う', () => {
+  const lot = [[0, 0], [20, 0], [20, 25], [0, 25]];
+  const dims = [{ k: 'c', bv: 0, lv: 0, d1: 1.5, d2: 1.1 }, { k: 'e', be: 1, le: 1, d: 2 }];
+  const Q = D.keepDims([[4, 4], [12, 1], [12, 8], [1, 8]], dims, lot);
+  near(Q[0], [1.5, 1.1], 1e-9);
+  assert.ok(Math.abs(Q[1][0] - 18) < 1e-9 && Math.abs(Q[2][0] - 18) < 1e-9, '東側の辺は境界から 2,000');
+  const ins = D.dimsAfterInsert(dims, 1);
+  assert.deepEqual(ins.filter(d => d.k === 'e').map(d => d.be), [1, 2], '分けた辺の両方に寸法が残る');
+  const del = D.dimsAfterDelete(dims, 3, 4);
+  assert.equal(del.length, 2);
+});
