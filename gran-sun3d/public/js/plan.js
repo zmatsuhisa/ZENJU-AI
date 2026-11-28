@@ -23,9 +23,9 @@ let DRAWN = { bldgs: [], win: null };   // bldgs: [{p:[[x,z]...], f:階数}]
 let cur = null;                          // 描いている途中：{raw:[[x,z]...]}
 let sel = -1, mode = 'draw';
 let dimPick = null; // 寸法で選んでいるもの {k:'e'|'c', b:建物, i:辺か角, l:敷地の辺か角}
-const hist = [];
+const hist = [], fut = [];
 const saveKey = () => 'gos-sun-draw-' + SITE;
-function snapshot() { hist.push(JSON.stringify({ DRAWN, cur })); if (hist.length > 60) hist.shift(); }
+function snapshot() { hist.push(JSON.stringify({ DRAWN, cur })); if (hist.length > 60) hist.shift(); fut.length = 0; }
 function save() { store.set(saveKey(), DRAWN); later(calc, 400); }
 
 function lotAngle(P) {
@@ -33,15 +33,16 @@ function lotAngle(P) {
   P.forEach((p, i) => { const q = P[(i + 1) % P.length], L = D.dist(p, q); if (L > best) { best = L; let a = Math.atan2(q[1] - p[1], q[0] - p[0]) / D.R; while (a > 45) a -= 90; while (a < -45) a += 90; ang = a; } });
   return Math.round(ang * 10) / 10;
 }
+// まわりの建物の高さ（3Dのページで直したものを使う）
+function loadHeights() { const H = store.get('gos-sun-h-' + SITE) || {}; OCC = SD.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h); }); }
 function loadSiteData(data, key) {
   SD = data; SITE = key; LOT = data.lot; ANG = lotAngle(LOT);
   store.set('gos-sun-site', key);
   // マス目の原点：図面の向きで見た敷地の北西の角
   const uv = LOT.map(p => D.toUV(p, ANG)); ORG = D.toXZ([Math.min(...uv.map(q => q[0])), Math.min(...uv.map(q => q[1]))], ANG);
-  const H = store.get('gos-sun-h-' + key) || {};
-  OCC = data.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h); });
+  loadHeights();
   lotArea = D.area(LOT); setbackLine = D.inset(LOT, .5);
-  DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; cur = null; sel = -1; hist.length = 0; closeDim();
+  DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; cur = null; sel = -1; hist.length = 0; fut.length = 0; closeDim();
   $('sitename').textContent = (data.name || '敷地') + ' 配置図'; document.title = 'グランOS｜配置図 ' + (data.name || '');
   $('lotnote').textContent = (data.lotNote || '敷地の形は地図からの概算（測量図ではない）') + `。敷地 約${lotArea.toFixed(1)}㎡`;
   ['to3d', 'to3d2'].forEach(id => $(id).href = 'index.html?site=' + encodeURIComponent(key));
@@ -104,6 +105,7 @@ function draw() {
     for (let k = Math.floor(u0 / SET.grid); k <= u1 / SET.grid; k++) line([k * SET.grid, v0], [k * SET.grid, v1], k % 4 === 0);
     for (let k = Math.floor(v0 / SET.grid); k <= v1 / SET.grid; k++) line([u0, k * SET.grid], [u1, k * SET.grid], k % 4 === 0);
   }
+  if (shadeOn) drawShadows();
   // まわりの建物
   SD.b.forEach((b, i) => { const o = OCC[i]; g.fillStyle = o.h > 8 ? '#a9a6a0' : '#c3c0b9'; g.strokeStyle = '#8d8a84'; g.lineWidth = 1; g.beginPath(); path(b.p, true); g.fill(); g.stroke(); });
   if (view.s > 9) SD.b.forEach((b, i) => { const o = OCC[i]; const c = [(o.x0 + o.x1) / 2, (o.z0 + o.z1) / 2]; if (Math.hypot(c[0] - view.x, c[1] - view.z) * view.s < Math.max(W, Hh)) label(`${o.h.toFixed(0)}m`, c, { size: 10, color: '#555', bg: 'rgba(255,255,255,.6)', weight: 600 }); });
@@ -133,7 +135,10 @@ function draw() {
     dot(P[0], '#272727', 7, '#fff');
     if (SET.close) { const [x, y] = toS(P[0]); g.strokeStyle = 'rgba(39,39,39,.35)'; g.setLineDash([4, 4]); g.beginPath(); g.arc(x, y, SET.close, 0, 7); g.stroke(); g.setLineDash([]); }
   }
-  if (stroke && stroke.length > 1) { g.strokeStyle = 'rgba(39,39,39,.55)'; g.lineWidth = 2; g.beginPath(); path(stroke); g.stroke(); }
+  if (stroke && stroke.length > 1) {
+    g.strokeStyle = 'rgba(39,39,39,.35)'; g.lineWidth = 2; g.beginPath(); path(stroke); g.stroke();
+    if (SET.straight && stroke.length > 2) { const simp = D.simplify(stroke, SET.strength / view.s), raw = cur ? cur.raw.concat(simp) : simp, P = shape(raw, false); g.setLineDash([7, 5]); g.strokeStyle = '#f7890a'; g.lineWidth = 2.5; g.beginPath(); path(P.slice(cur ? Math.max(0, shape(cur.raw, false).length - 1) : 0)); g.stroke(); g.setLineDash([]); }
+  }
   // 方位と縮尺
   const nx = W - 34, ny = Hh - 190 < 120 ? 120 : 150;
   g.save(); g.translate(nx, ny); g.fillStyle = '#272727'; g.beginPath(); g.moveTo(0, -18); g.lineTo(7, 8); g.lineTo(0, 3); g.lineTo(-7, 8); g.closePath(); g.fill(); g.font = '700 12px Poppins,sans-serif'; g.textAlign = 'center'; g.fillText('N', 0, -24); g.restore();
@@ -204,7 +209,7 @@ function hud() {
   else if (cur) { $('selk').innerHTML = `描いている途中<small>描き始めの点に戻すか「閉じる」</small>`; $('fdown').parentElement.hidden = true; }
   else if (outs) { $('selk').innerHTML = `<span style="color:var(--red)">敷地からはみ出している建物が ${outs}棟あります</span><small>「直す」で敷地の中に入れてください</small>`; $('fdown').parentElement.hidden = true; }
   if (!$('dimrow').hidden) $('selrow').hidden = true;
-  $('close').disabled = !cur;
+  $('close').hidden = !cur; $('undo').disabled = !hist.length; $('redo').disabled = !fut.length;
 }
 let calcT = 0; function later(fn, ms) { clearTimeout(calcT); calcT = setTimeout(fn, ms); }
 let calcRun = 0;
@@ -243,7 +248,9 @@ function closeCur() {
   cur = null; save(); hud(); draw();
 }
 $('close').addEventListener('click', closeCur);
-$('undo').addEventListener('click', () => { const s = hist.pop(); if (!s) return showHint('戻せるものがありません'); const o = JSON.parse(s); DRAWN = o.DRAWN; cur = o.cur; sel = -1; save(); hud(); draw(); });
+function restore(from, to, none) { const s = from.pop(); if (!s) return showHint(none); to.push(JSON.stringify({ DRAWN, cur })); const o = JSON.parse(s); DRAWN = o.DRAWN; cur = o.cur; if (sel >= DRAWN.bldgs.length) sel = -1; closeDim(); save(); hud(); draw(); }
+$('undo').addEventListener('click', () => restore(hist, fut, '戻せるものがありません'));
+$('redo').addEventListener('click', () => restore(fut, hist, 'やり直せるものがありません'));
 $('del').addEventListener('click', () => { snapshot(); if (cur) cur = null; else if (sel >= 0) { DRAWN.bldgs.splice(sel, 1); sel = -1; if (!DRAWN.bldgs.length) DRAWN.win = null; } save(); hud(); draw(); });
 $('fdown').addEventListener('click', () => { if (sel < 0) return; snapshot(); DRAWN.bldgs[sel].f = 1; save(); hud(); draw(); });
 $('fup').addEventListener('click', () => { if (sel < 0) return; snapshot(); DRAWN.bldgs[sel].f = 2; save(); hud(); draw(); });
@@ -298,7 +305,9 @@ cv.addEventListener('pointerdown', e => {
   // 直す
   const h = hitTest(w);
   if (!h) { sel = -1; act = { pan: sp }; hud(); draw(); return; }
-  snapshot(); sel = h.b; act = Object.assign({ start: w, orig: JSON.parse(JSON.stringify(DRAWN.bldgs[h.b].p)), moved: false, win: h.all && winOf(DRAWN.bldgs[h.b].p) ? DRAWN.win.slice() : null }, h); hud(); draw();
+  const now = performance.now(), dbl = lastTap && now - lastTap.t < 380 && Math.hypot(sp[0] - lastTap.sp[0], sp[1] - lastTap.sp[1]) < 14; lastTap = { t: now, sp };
+  if (dbl && (h.v != null || h.e != null)) { editVertex(h, w); lastTap = null; return; }
+  sel = h.b; act = Object.assign({ before: JSON.stringify({ DRAWN, cur }), start: w, orig: JSON.parse(JSON.stringify(DRAWN.bldgs[h.b].p)), moved: false, win: h.all && winOf(DRAWN.bldgs[h.b].p) ? DRAWN.win.slice() : null }, h); hud(); draw();
 });
 cv.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return;
@@ -312,26 +321,101 @@ cv.addEventListener('pointermove', e => {
   if (stroke) { stroke.push(w); draw(); return; }
   if (!act) return;
   if (act.pan) { view.x -= (sp[0] - act.pan[0]) / view.s; view.z -= (sp[1] - act.pan[1]) / view.s; act.pan = sp; draw(); return; }
-  const P = DRAWN.bldgs[act.b].p, d = [w[0] - act.start[0], w[1] - act.start[1]]; act.moved = true;
-  if (act.v != null) P[act.v] = snapP([act.orig[act.v][0] + d[0], act.orig[act.v][1] + d[1]]);
+  const P = DRAWN.bldgs[act.b].p, d = [w[0] - act.start[0], w[1] - act.start[1]];
+  if (!act.moved && act.before) { hist.push(act.before); if (hist.length > 60) hist.shift(); fut.length = 0; }
+  if (act.v != null) P[act.v] = magnetPoint(snapP([act.orig[act.v][0] + d[0], act.orig[act.v][1] + d[1]]));
   else if (act.e != null) {
     const a = act.orig[act.e], c = act.orig[(act.e + 1) % P.length], L = D.dist(a, c), n = [(c[1] - a[1]) / L, -(c[0] - a[0]) / L];
     let t = d[0] * n[0] + d[1] * n[1]; if (SET.grid) t = Math.round(t / SET.grid) * SET.grid;
+    t = magnetEdge(a, c, n, t);
     P[act.e] = [a[0] + n[0] * t, a[1] + n[1] * t]; P[(act.e + 1) % P.length] = [c[0] + n[0] * t, c[1] + n[1] * t];
   } else { const s = snapDelta(d); act.orig.forEach((p, k) => P[k] = [p[0] + s[0], p[1] + s[1]]); if (act.win) DRAWN.win = [act.win[0] + s[0], act.win[1] + s[1]]; }
-  hud(); draw();
+  act.moved = true; hud(); draw();
 });
 function up(e) {
   if (!ptrs.has(e.pointerId)) return;
   ptrs.delete(e.pointerId);
   if (gesture) { if (ptrs.size < 2) gesture = null; return; }
   if (stroke) { const s = stroke; stroke = null; finishStroke(s); draw(); return; }
-  if (act && act.b != null) { if (act.moved) save(); else hist.pop(); }
+  if (act && act.b != null && act.moved) save();
   act = null; hud(); draw();
 }
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 cv.addEventListener('wheel', e => { e.preventDefault(); const sp = pos(e), before = toW(...sp); view.s = Math.max(2, Math.min(200, view.s * Math.exp(-e.deltaY * .0015))); const after = toW(...sp); view.x += before[0] - after[0]; view.z += before[1] - after[1]; draw(); }, { passive: false });
-document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); $('undo').click(); } if (e.key === 'Enter' && cur) closeCur(); if (e.key === 'Escape' && cur) { snapshot(); cur = null; hud(); draw(); } });
+document.addEventListener('keydown', e => {
+  if (/INPUT|SELECT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) return;
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); $('redo').click(); return; }
+  if (sel >= 0 && !cur && /^Arrow/.test(e.key)) { e.preventDefault(); const st = SET.grid || .1, u = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key]; snapshot(); moveB(DRAWN.bldgs[sel], D.toXZ(u, ANG)); save(); hud(); draw(); return; }
+  if (sel >= 0 && !cur && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); $('del').click(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); $('undo').click(); } if (e.key === 'Enter' && cur) closeCur(); if (e.key === 'Escape' && cur) { snapshot(); cur = null; hud(); draw(); } });
+
+// ---------- 直すときの手助け ----------
+let lastTap = null;
+// 角を2回押す→角を消す（4つより多いとき）、辺を2回押す→押した所に角を足す。寸法は番号がずれるので消す
+function editVertex(h, w) {
+  const b = DRAWN.bldgs[h.b]; snapshot();
+  if (h.v != null) { if (b.p.length <= 3) { hist.pop(); return showHint('角が3つより少なくなるので消せません'); } b.p.splice(h.v, 1); showHint('角を消しました'); }
+  else { const { q } = D.nearestOnSeg(w, b.p[h.e], b.p[(h.e + 1) % b.p.length]); b.p.splice(h.e + 1, 0, snapP(q)); showHint('角を足しました。引っぱって形を変えられます'); }
+  if (b.dims && b.dims.length) { b.dims = []; showHint('角の数が変わったので、決めた寸法を消しました'); }
+  sel = h.b; save(); hud(); draw();
+}
+// 境界線と50cmの線（吸い付く先）
+function magnetLines() { const L = []; const add = P => P.forEach((a, i) => L.push([a, P[(i + 1) % P.length]])); add(LOT); if (SET.setback && setbackLine.length) add(setbackLine); return L; }
+// 角：線の近く（画面で10画素）なら線の上へ。2本の線の近くなら交わる所へ
+function magnetPoint(p) {
+  const tol = 10 / view.s, near = magnetLines().map(([a, b]) => ({ a, b, ...D.nearestOnSeg(p, a, b) })).filter(o => D.dist(o.q, p) < tol).sort((x, y) => D.dist(x.q, p) - D.dist(y.q, p));
+  if (!near.length) return p;
+  if (near.length > 1) { const [o1, o2] = near, d1 = [o1.b[0] - o1.a[0], o1.b[1] - o1.a[1]], d2 = [o2.b[0] - o2.a[0], o2.b[1] - o2.a[1]], den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) > 1e-6) { const t = ((o2.a[0] - o1.a[0]) * d2[1] - (o2.a[1] - o1.a[1]) * d2[0]) / den, x = [o1.a[0] + d1[0] * t, o1.a[1] + d1[1] * t]; if (D.dist(x, p) < tol * 1.5) return x; } }
+  return near[0].q;
+}
+// 辺：ほぼ平行な線の近くなら、その線にぴったり重ねる
+function magnetEdge(a, c, n, t) {
+  const tol = 10 / view.s, dir = Math.atan2(c[1] - a[1], c[0] - a[0]);
+  let best = null;
+  magnetLines().forEach(([p, q]) => {
+    let dd = Math.atan2(q[1] - p[1], q[0] - p[0]) - dir; dd = Math.abs(Math.atan2(Math.sin(dd), Math.cos(dd))); if (Math.min(dd, Math.PI - dd) > 2 * D.R) return;
+    const m = [(a[0] + c[0]) / 2 + n[0] * t, (a[1] + c[1]) / 2 + n[1] * t], { q: f } = D.nearestOnSeg(m, p, q), gap = (f[0] - m[0]) * n[0] + (f[1] - m[1]) * n[1];
+    if (Math.abs(gap) < tol && D.dist(f, m) < tol * 1.5 && (!best || Math.abs(gap) < Math.abs(best))) best = gap;
+  });
+  return best == null ? t : t + best;
+}
+
+// ---------- 影（3Dのページと同じ日付・時刻） ----------
+let shadeOn = false;
+const TK = 'gos-sun-time';
+const shadeDay = () => { const t = store.get(TK) || {}; return { md: t.md || '12-22', m: t.m || 600 }; };
+function syncShadeUI() { const t = shadeDay(); $('ptime').value = t.m; $('ptout').textContent = String(Math.floor(t.m / 60)).padStart(2, '0') + ':' + String(t.m % 60).padStart(2, '0'); document.querySelectorAll('#shaderow [data-d]').forEach(b => b.classList.toggle('on', b.dataset.d === t.md)); $('ptime').style.setProperty('--p', ((t.m - 300) / 960 * 100) + '%'); }
+function setShadeDay(md, m) { const t = shadeDay(); store.set(TK, { md: md || t.md, m: m == null ? t.m : m }); syncShadeUI(); draw(); }
+$('shadeb').addEventListener('click', () => { shadeOn = !shadeOn; $('shadeb').setAttribute('aria-pressed', shadeOn); $('shaderow').hidden = !shadeOn; syncShadeUI(); draw(); });
+document.querySelectorAll('#shaderow [data-d]').forEach(b => b.addEventListener('click', () => setShadeDay(b.dataset.d)));
+$('ptime').addEventListener('input', e => setShadeDay(null, +e.target.value));
+const shadeCv = document.createElement('canvas'), sg = shadeCv.getContext('2d');
+// 建物の影：建物の形と、太陽と反対へずらした形をつないだ範囲。重なっても濃くならないよう別の紙に描いてから重ねる
+function drawShadows() {
+  const t = shadeDay(), s = S.sun(S.ms(YEAR + '-' + t.md, t.m), SD.lat, SD.lon);
+  if (s.alt <= 0) { label('日が沈んでいます', toW(W / 2, 60), { size: 12 }); return; }
+  shadeCv.width = cv.width; shadeCv.height = cv.height; sg.setTransform(dpr, 0, 0, dpr, 0, 0); sg.fillStyle = '#1d2433';
+  const k = 1 / Math.tan(s.alt * D.R), dx = -Math.sin(s.az * D.R) * k, dz = Math.cos(s.az * D.R) * k;
+  const shapes = OCC.map(o => ({ p: o.p, h: o.h })).concat(DRAWN.bldgs.map(b => ({ p: b.p, h: S.drawHeight(b.f) })));
+  const vx0 = toW(0, 0), vx1 = toW(W, Hh);
+  shapes.forEach(({ p, h }) => {
+    const ox = dx * h, oz = dz * h;
+    const xs = p.map(q => q[0]), zs = p.map(q => q[1]);
+    if (Math.max(...xs) + Math.max(0, ox) < vx0[0] || Math.min(...xs) + Math.min(0, ox) > vx1[0] || Math.max(...zs) + Math.max(0, oz) < vx0[1] || Math.min(...zs) + Math.min(0, oz) > vx1[1]) return;
+    const sp = q => toS(q), P2 = p.map(q => [q[0] + ox, q[1] + oz]);
+    const poly = Q => { sg.beginPath(); Q.forEach((q, i) => { const [x, y] = sp(q); i ? sg.lineTo(x, y) : sg.moveTo(x, y); }); sg.closePath(); sg.fill(); };
+    poly(P2); p.forEach((a, i) => { const b = p[(i + 1) % p.length]; poly([a, b, P2[(i + 1) % p.length], P2[i]]); });
+  });
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = .28; g.drawImage(shadeCv, 0, 0); g.restore();
+}
+// 3Dのページで日付・時刻や隣家の高さを変えたら、こちらも合わせる
+addEventListener('storage', e => {
+  if (e.key === TK) { syncShadeUI(); draw(); }
+  if (SD && e.key === 'gos-sun-h-' + SITE) { loadHeights(); later(calc, 300); draw(); }
+  if (SD && e.key === saveKey()) { DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; hud(); draw(); later(calc, 300); }
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden && SD) { loadHeights(); syncShadeUI(); draw(); later(calc, 300); } });
 
 // ---------- 寸法で合わせる ----------
 // LDK の窓がこの建物のものか（建物の外周から 60cm 以内）

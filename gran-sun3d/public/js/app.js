@@ -203,6 +203,12 @@ function drawHeat(ds) {
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const YEAR = today.slice(0, 4);
 $('date').value = YEAR + '-12-22';
+// 日付・時刻は配置図のページと共有する（gos-sun-time）
+const TK = 'gos-sun-time';
+function applyTime() { const t = store.get(TK); if (!t) return false; if (t.md) $('date').value = YEAR + '-' + t.md; if (t.m) $('time').value = t.m; document.querySelectorAll('[data-d]').forEach(x => x.classList.toggle('on', $('date').value.slice(5) === x.dataset.d)); return true; }
+applyTime();
+let lastT = '';
+function saveTime() { const v = JSON.stringify({ md: curDay().slice(5), m: +$('time').value }); if (v !== lastT) { lastT = v; store.set(TK, JSON.parse(v)); } }
 const curDay = () => $('date').value || today;
 let DAY = null;
 const DN = { '12-22': '冬至', '03-20': '春分', '06-21': '夏至', '09-23': '秋分' };
@@ -230,6 +236,7 @@ function drawArc() {
 }
 function moveDot() { const d = document.getElementById('sdot'); if (!d || !DAY) return; const m = +$('time').value, a = sunAt(DAY.ds, m).alt; const x = 6 + Math.max(0, Math.min(1, (m - DAY.rise) / (DAY.set - DAY.rise))) * 138, y = 40 - Math.max(0, a) / Math.max(DAY.noon, 1) * 32; d.setAttribute('cx', x); d.setAttribute('cy', y); d.setAttribute('opacity', a > 0 ? 1 : .3); }
 function update() {
+  later('time', saveTime, 300);
   const ds = curDay(), m = +$('time').value, s = sunAt(ds, m), v = vec(s);
   $('tout').textContent = hm(m); $('time').style.setProperty('--p', ((m - 300) / 960 * 100) + '%');
   $('sunk').textContent = s.alt > 0 ? '太陽 ' + dirName(s.az) : '太陽'; $('sunv').innerHTML = s.alt > 0 ? s.alt.toFixed(1) + '°<small>の高さ</small>' : '日没中';
@@ -372,6 +379,8 @@ function initPlan() {
   const saved = store.get('gos-sun-plan-' + SITE);
   if (saved && saved.size) Object.assign(plan, { f: saved.f, u: saved.u, n: saved.n, size: saved.size });
   loadDrawn();
+  // 配置図から戻ってきて形が変わっていたら、「配置図の形」で見せる
+  if (DRAWN.bldgs.length && (!saved || saved.sig !== JSON.stringify(DRAWN.bldgs))) plan.f = 3;
   $('pu').min = frame.u0.toFixed(1); $('pu').max = frame.u1.toFixed(1);
   $('pn').min = 0; $('pn').max = Math.max(1, Dp - 3).toFixed(1);
   syncPlanUI(); drawPlan(); later('cmp', comparePlans, 400);
@@ -424,7 +433,7 @@ function drawDrawn() {
 }
 function planChanged(calc) {
   clampPlan(); syncPlanUI(); drawPlan(); heatFor = ''; if (heat.visible) drawHeat(curDay());
-  store.set('gos-sun-plan-' + SITE, { f: plan.f, u: plan.u, n: plan.n, size: plan.size });
+  store.set('gos-sun-plan-' + SITE, { f: plan.f, u: plan.u, n: plan.n, size: plan.size, sig: JSON.stringify(DRAWN.bldgs) });
   if (calc) { later('center', centerHours, 150); later('cmp', comparePlans, 400); later('shades', shadeList, 400); }
 }
 document.querySelectorAll('[data-pf]').forEach(b => b.addEventListener('click', () => { plan.f = +b.dataset.pf; planChanged(true); }));
@@ -508,8 +517,9 @@ async function loadSite(key) {
 })();
 fixedNote();
 // 配置図で描き直したら（別のタブや、戻ってきたとき）読み直す
-function drawnChanged() { if (!LOT) return; const before = JSON.stringify(DRAWN); loadDrawn(); if (JSON.stringify(DRAWN) !== before) { syncPlanUI(); planChanged(true); } }
-addEventListener('storage', e => { if (e.key === 'gos-sun-draw-' + SITE) drawnChanged(); });
+// 配置図で描き直したら、自動で「配置図の形」にする
+function drawnChanged() { if (!LOT) return; const before = JSON.stringify(DRAWN); loadDrawn(); if (JSON.stringify(DRAWN) !== before) { if (DRAWN.bldgs.length) plan.f = 3; syncPlanUI(); planChanged(true); } }
+addEventListener('storage', e => { if (e.key === 'gos-sun-draw-' + SITE) drawnChanged(); if (e.key === TK && applyTime()) { lastT = JSON.stringify(store.get(TK)); newDay(); } });
 addEventListener('pageshow', drawnChanged);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) drawnChanged(); });
 
