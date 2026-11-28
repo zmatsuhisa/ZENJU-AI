@@ -23,7 +23,7 @@ SAMPLES = {
 }
 # 依存される側から順に並べる
 ORDER = ["core/normalize.js", "core/shift.js", "core/zip.js", "core/readers.js", "core/diff.js", "core/check.js",
-         "overlay.js", "sheets.js", "markup/engine.js", "markup/view.js"]
+         "overlay.js", "vector.js", "sheets.js", "markup/engine.js", "markup/view.js"]
 
 
 def replace_once(s: str, old: str, new: str) -> str:

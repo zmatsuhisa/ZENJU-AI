@@ -37,11 +37,12 @@ export function diffPdf(oldDoc, newDoc, map = null) {
     // 1) 同じ文字で一番近いもの同士を対応づける
     const byText = new Map();
     for (const c of B) { if (!byText.has(c.text)) byText.set(c.text, []); byText.get(c.text).push(c); }
-    for (const c of A) {
-      const cands = (byText.get(c.text) || []).filter(d => !d.used);
-      if (!cands.length) continue;
-      let best = cands[0], bd = dist(c, best);
-      for (const d of cands) { const dd = dist(c, d); if (dd < bd) { best = d; bd = dd; } }
+    // 近い組から順に決める（「W1600」のように同じ文字がたくさんあるとき、上から順に決めると組がずれて「移動」が連鎖するため）
+    const cand = [];
+    for (const c of A) for (const d of byText.get(c.text) || []) cand.push([dist(c, d), c, d]);
+    cand.sort((p, q) => p[0] - q[0]);
+    for (const [bd, c, best] of cand) {
+      if (c.used || best.used) continue;
       c.used = best.used = true;
       if (bd > NEAR) out.push({ type: 'moved', page, pageA: pa, before: c.text, after: c.text, x: best.x, y: best.y, from: { x: c.x, y: c.y } });
     }

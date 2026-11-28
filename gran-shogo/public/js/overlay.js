@@ -224,14 +224,15 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
       const { dx, dy } = shifts[label[ti]];
       const i = (y * w + x) * 4;
       const a = at(A, x, y), b = at(B, x + dx, y + dy);
-      let r = 255, g = 255, bl = 255;
-      if (a && b) { r = g = bl = 196; }
-      else if (a && !near(B, x + dx, y + dy) && !others[ti].some(s => near(B, x + s.dx, y + s.dy))) { r = 200; g = 55; bl = 45; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; if (mA[y * w + x]) diffT[ci]++; }
-      else if (b && !near(A, x, y) && !others[ti].some(s => near(A, x + dx - s.dx, y + dy - s.dy))) { r = 68; g = 107; bl = 235; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; const bx = x + dx, by = y + dy; if (bx >= 0 && by >= 0 && bx < B.w && by < B.h && mB[by * B.w + bx]) diffT[ci]++; }
-      else if (a || b) { r = g = bl = 196; }
+      let r, g, bl;
+      if (a && !b && !near(B, x + dx, y + dy) && !others[ti].some(s => near(B, x + s.dx, y + s.dy))) { r = 200; g = 55; bl = 45; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; if (mA[y * w + x]) diffT[ci]++; }
+      else if (b && !a && !near(A, x, y) && !others[ti].some(s => near(A, x + dx - s.dx, y + dy - s.dy))) { r = 68; g = 107; bl = 235; const ci = ((y / cell) | 0) * gw + ((x / cell) | 0); diff[ci]++; const bx = x + dx, by = y + dy; if (bx >= 0 && by >= 0 && bx < B.w && by < B.h && mB[by * B.w + bx]) diffT[ci]++; }
+      else { r = g = bl = baseGray(A, B, x, y, dx, dy); }
       px[i] = r; px[i + 1] = g; px[i + 2] = bl; px[i + 3] = 255;
     }
   }
+  // 線が数px動いただけの所（CAD の出し直しの小さなずれ）は、その場所だけ合わせ直して変更から外す
+  const local = fitLocal(A, B, regions(diff, gw, gh, cell, scan ? 12 : 6), label, tw, th, shifts, at, near, px, diff, diffT, mA, mB, w, h, cell, gw);
   const shift = shifts[main];
   // ページ全体と違うずれで合わせたマスのかたまりの数（＝図が動いた場所）
   let moved = 0;
@@ -264,7 +265,68 @@ export function compose(canvasA, canvasB, words = null, { scan = false } = {}) {
   ctx.strokeStyle = '#f7890a';
   ctx.lineWidth = Math.max(2, w / 600);
   for (const b of boxes) roundRect(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 10);
-  return { canvas: out, boxes, shift, moved };
+  return { canvas: out, boxes, shift, moved, nudged: local };
+}
+
+// 両方の版にある線・文字は、元の濃さのまま少しだけ薄くして描く（白黒2値にすると細い文字がかすれるため）
+function baseGray(A, B, x, y, dx, dy) {
+  const ga = x < A.w && y < A.h ? A.g[y * A.w + x] : 255;
+  const bx = x + dx, by = y + dy;
+  const gb = bx >= 0 && by >= 0 && bx < B.w && by < B.h ? B.g[by * B.w + bx] : 255;
+  const v = Math.min(ga, gb);
+  return v >= 250 ? 255 : Math.round(255 - (255 - v) * 0.62);
+}
+
+// 変更のかたまりごとに、±NUDGE px の範囲でずらして合うか試す。
+// 合えば、その場所の赤・青をずらした位置で塗り直す（本当に変わった線・文字はそれでも赤・青に残る）。
+// 返り値：合わせ直したかたまりの数
+const NUDGE = 8;
+function fitLocal(A, B, boxes, label, tw, th, shifts, at, near, px, diff, diffT, mA, mB, w, h, cell, gw) {
+  let fixed = 0;
+  for (const b of boxes) {
+    const ti = Math.min(th - 1, ((b.y + b.h / 2) / TILE) | 0) * tw + Math.min(tw - 1, ((b.x + b.w / 2) / TILE) | 0);
+    const s = shifts[label[ti]];
+    const x0 = b.x, y0 = b.y, x1 = Math.min(w, b.x + b.w), y1 = Math.min(h, b.y + b.h);
+    // かたまりの中の線の点（多ければ間引く）
+    const pa = [], pb = [];
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      if (at(A, x, y)) pa.push(x, y);
+      if (at(B, x + s.dx, y + s.dy)) pb.push(x, y);
+    }
+    const n = (pa.length + pb.length) / 2;
+    if (!n) continue;
+    const ka = Math.max(1, Math.floor(pa.length / 2 / 1500)) * 2, kb = Math.max(1, Math.floor(pb.length / 2 / 1500)) * 2;
+    const miss = (ex, ey) => {
+      let m = 0, c = 0;
+      for (let k = 0; k < pa.length; k += ka) { c++; if (!near(B, pa[k] + s.dx + ex, pa[k + 1] + s.dy + ey)) m++; }
+      for (let k = 0; k < pb.length; k += kb) { c++; if (!near(A, pb[k] - ex, pb[k + 1] - ey)) m++; }
+      return c ? m / c : 0;
+    };
+    const m0 = miss(0, 0);
+    let best = { ex: 0, ey: 0, m: m0 };
+    for (let ey = -NUDGE; ey <= NUDGE; ey++) for (let ex = -NUDGE; ex <= NUDGE; ex++) {
+      if (!ex && !ey) continue;
+      const m = miss(ex, ey);
+      if (m < best.m) best = { ex, ey, m };
+    }
+    // ずらしてもほとんど良くならない（本当の変更）なら、そのまま
+    // ずらすとほぼ全部の線が重なるときだけ（＝線が動いただけ）。数字の書き換えなど本当の変更は、ずらしても重ならないので残る
+    if ((!best.ex && !best.ey) || best.m > 0.06 || best.m > m0 * 0.3) continue;
+    fixed++;
+    const sx = s.dx + best.ex, sy = s.dy + best.ey;
+    // このかたまりのマスの数え直し
+    for (let cy = y0 / cell; cy < Math.ceil(y1 / cell); cy++) for (let cx = x0 / cell; cx < Math.ceil(x1 / cell); cx++) { diff[cy * gw + cx] = 0; diffT[cy * gw + cx] = 0; }
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * w + x) * 4, ci = ((y / cell) | 0) * gw + ((x / cell) | 0);
+      const a = at(A, x, y), bb = at(B, x + sx, y + sy);
+      let r, g, bl;
+      if (a && !near(B, x + sx, y + sy) && !near(B, x + s.dx, y + s.dy)) { r = 200; g = 55; bl = 45; diff[ci]++; if (mA[y * w + x]) diffT[ci]++; }
+      else if (bb && !near(A, x, y) && !near(A, x + best.ex, y + best.ey)) { r = 68; g = 107; bl = 235; diff[ci]++; const X = x + sx, Y = y + sy; if (X >= 0 && Y >= 0 && X < B.w && Y < B.h && mB[Y * B.w + X]) diffT[ci]++; }
+      else { r = g = bl = baseGray(A, B, x, y, s.dx, s.dy); } // 灰色はもとの合わせ方で描く（動いた線は灰色の二重線に見える）
+      px[i] = r; px[i + 1] = g; px[i + 2] = bl;
+    }
+  }
+  return fixed;
 }
 
 // 両方の版に1回ずつ出てくる同じ文字で、位置が少しだけ変わったものの組 [[変更前, 変更後], …]

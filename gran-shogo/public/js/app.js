@@ -7,6 +7,7 @@ import { diffPdf, diffXlsx } from './core/diff.js';
 import { crossCheck, guessRole, changesToFindings, ROLES } from './core/check.js';
 import { escapeHtml as h } from './core/normalize.js';
 import { renderPage, compose } from './overlay.js';
+import { composeVector, TOL as VEC_TOL } from './vector.js';
 import { showMarkup } from './markup/view.js';
 import { loadCv } from './markup/engine.js';
 import { printSheets, saveZip, today } from './sheets.js';
@@ -412,7 +413,7 @@ function renderList() {
 
 // 図面の重ね合わせ（今この画面で読み込んだ新旧PDFがあるときだけ）
 // ページの切り替え：◀ ▶ の矢印、横にスクロールできるページ一覧（変更の件数つき）、キーボードの ← →
-const ov = { docs: null, jobs: [], pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0, pick: {}, textMoves: false };
+const ov = { docs: null, jobs: [], pages: 0, page: 1, mode: 'mix', cache: new Map(), counts: {}, seq: 0, pick: {}, textMoves: false, zoom: 1 };
 
 async function showOverlay() {
   const slot = $('#overlay-slot');
@@ -424,8 +425,9 @@ async function showOverlay() {
       <div class="pg-strip" id="ov-strip" role="group" aria-label="ページ"></div>
       <button class="pg-arrow" type="button" data-go="1" aria-label="次のページ">›</button>
     </div>
-    <div class="pad legend no-print"><span><i class="o"></i>変更前だけにある線・文字</span><span><i class="n"></i>変更後だけにある線・文字</span><span><i class="c"></i>変わった場所</span>
-    <span class="seg" role="group" aria-label="重ね合わせの表示" style="margin-left:auto"><button type="button" class="on" data-ov="mix" aria-pressed="true">重ね</button><button type="button" data-ov="old" aria-pressed="false">変更前</button><button type="button" data-ov="new" aria-pressed="false">変更後</button><button type="button" data-ov="mark" aria-pressed="false">変更後に○印</button></span></div>
+    <div class="pad legend no-print"><span><i style="background:#9a9a9a"></i>両方にある線・文字</span><span><i class="o"></i>変更前だけにある線・文字</span><span><i class="n"></i>変更後だけにある線・文字</span><span><i class="c"></i>変わった場所</span>
+    <span class="seg" role="group" aria-label="重ね合わせの表示" style="margin-left:auto"><button type="button" class="on" data-ov="mix" aria-pressed="true">重ね</button><button type="button" data-ov="old" aria-pressed="false">変更前</button><button type="button" data-ov="new" aria-pressed="false">変更後</button><button type="button" data-ov="mark" aria-pressed="false">変更後に○印</button></span>
+    <span class="seg" role="group" aria-label="拡大"><button type="button" class="on" data-zoom="1" aria-pressed="true">全体</button><button type="button" data-zoom="2" aria-pressed="false">2倍</button><button type="button" data-zoom="3" aria-pressed="false">3倍</button></span></div>
     <div class="pad ov-marks no-print" id="ov-marks" hidden>
       <span class="small muted" id="ov-mark-note"></span>
       <label class="opt"><input type="checkbox" id="ov-textmoves"><span>文字の位置を動かしただけの所にも○を付ける</span></label>
@@ -462,6 +464,15 @@ async function showOverlay() {
       showView();
     });
     $('#ov-textmoves').onchange = e => { ov.textMoves = e.target.checked; showView(); };
+    slot.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => {
+      const wrap = $('#ov'), old = ov.zoom, z = Number(b.dataset.zoom);
+      // 見ていた所（画面の中央）を保ったまま拡大・縮小する
+      const cx = (wrap.scrollLeft + wrap.clientWidth / 2) / old, cy = (wrap.scrollTop + wrap.clientHeight / 2) / old;
+      ov.zoom = z;
+      slot.querySelectorAll('[data-zoom]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      applyZoom();
+      wrap.scrollLeft = cx * z - wrap.clientWidth / 2; wrap.scrollTop = cy * z - wrap.clientHeight / 2;
+    });
     $('#ov-print').onclick = () => exportMarked('print');
     $('#ov-zip').onclick = () => exportMarked('zip');
     if (ov.pages > 1) {
@@ -528,7 +539,7 @@ function warpTo(ca, sa, cb, sb, H) {
 
 // 1組分を描く（重ね合わせ・変更前・変更後の3つの絵と、件数）
 async function drawJob(p) {
-  const j = ov.jobs[p - 1], [pa, pb] = ov.docs, width = 1800;
+  const j = ov.jobs[p - 1], [pa, pb] = ov.docs, width = 2400; // 細い文字がつぶれないよう大きめに描く
   if (j.kind !== 'pair') {
     const { canvas } = await renderPage(j.kind === 'added' ? pb : pa, j.kind === 'added' ? j.b : j.a, width);
     return { views: { mix: canvas, old: canvas, new: canvas }, lines: 0, text: 0, shift: { dx: 0, dy: 0 }, whole: j.kind, n: 1 };
@@ -536,7 +547,13 @@ async function drawJob(p) {
   let [{ canvas: ca, words: wa, scale: sa }, { canvas: cb, scale, words: wb }] = await Promise.all([renderPage(pa, j.a, width), renderPage(pb, j.b, width)]);
   let warped = false;
   if (j.H) { const w = warpTo(ca, sa, cb, scale, j.H); if (w) { ca = w; wa = []; warped = true; } }
-  const { canvas, boxes, shift, moved } = compose(ca, cb, { a: wa, b: wb }, { scan: warped });
+  // CAD の PDF は線データで比べる（小さなずれに強く、線も文字もくっきり）。線データがないページ・スキャンは画像で比べる
+  let vec = null;
+  if (!warped) {
+    try { const [ga, gb] = await Promise.all([pa.getPage(j.a), pb.getPage(j.b)]); vec = await composeVector(pdfjs.OPS, ga, gb, cb, scale, wa, wb, sa); }
+    catch (e) { console.error(e); vec = null; }
+  }
+  const { canvas, boxes, shift, moved, nudged } = vec || compose(ca, cb, { a: wa, b: wb }, { scan: warped });
   // 文字の差分で見つけた場所にも枠（小さな数字の書き換えは線の差だけでは目立たないため）
   const ctx = canvas.getContext('2d');
   ctx.strokeStyle = '#f7890a'; ctx.lineWidth = 3;
@@ -546,7 +563,7 @@ async function drawJob(p) {
     ctx.strokeRect((x - 6) * scale, (y - hh - 6) * scale, (w + 12) * scale, (hh + 14) * scale);
   }
   const marks = markList(boxes, textBoxes, scale);
-  return { views: { mix: canvas, old: ca, new: cb }, after: cb, marks, lines: boxes.length, text: textBoxes.length, shift, moved, warped, n: boxes.length + textBoxes.length };
+  return { views: { mix: canvas, old: ca, new: cb }, after: cb, marks, lines: boxes.length, text: textBoxes.length, shift, moved, nudged, warped, vector: !!vec, n: boxes.length + textBoxes.length };
 }
 
 // ○印を付ける場所（変更後の図面の px）。線の違いと文字の違いが重なる所は1つにまとめる
@@ -606,7 +623,7 @@ function showView() {
   if (!c) return;
   const markMode = ov.mode === 'mark' && !c.whole;
   $('#ov-marks').hidden = ov.mode !== 'mark';
-  if (!markMode) { $('#ov').replaceChildren(c.views[ov.mode] || c.views.new); if (ov.mode === 'mark') $('#ov-mark-note').textContent = 'このページは組になる前の版がないので、○印はありません。'; return; }
+  if (!markMode) { $('#ov').replaceChildren(c.views[ov.mode] || c.views.new); applyZoom(); if (ov.mode === 'mark') $('#ov-mark-note').textContent = 'このページは組になる前の版がないので、○印はありません。'; return; }
   const cv = drawMarked(p, c);
   cv.classList.add('markable');
   cv.onclick = ev => {
@@ -625,8 +642,15 @@ function showView() {
     $('#ov').scrollTop = top;
   };
   $('#ov').replaceChildren(cv);
+  applyZoom();
   const n = markCount(p, c);
   $('#ov-mark-note').textContent = `○印 ${n.on}か所` + (n.text ? `（文字の位置を動かしただけの所 ${n.text}か所は○なし）` : '') + (n.off ? `・消した印 ${n.off}か所` : '') + '。○を押すと消せます（もう一度押すと戻ります）。';
+}
+
+// 拡大：図面の幅を枠の何倍にするか（枠の中で縦横にスクロールして見る）
+function applyZoom() {
+  const c = $('#ov')?.querySelector('canvas');
+  if (c) { c.style.width = `${ov.zoom * 100}%`; c.style.maxWidth = 'none'; }
 }
 
 // ○印つきの変更後図面を、全ページまとめて印刷（PDFで保存）または画像の zip にする
@@ -678,7 +702,7 @@ async function goPage(p) {
     const c = await drawJob(p);
     ov.cache.set(p, c);
     // 大きな画像なので、近くの数ページ分だけ残す
-    for (const k of ov.cache.keys()) if (Math.abs(k - p) > 2) ov.cache.delete(k);
+    for (const k of ov.cache.keys()) if (Math.abs(k - p) > 1) ov.cache.delete(k);
     ov.counts[p] = c.n; // 描けたら、線と文字の違いを合わせた件数にする
   }
   if (my !== ov.seq) return;
@@ -688,7 +712,7 @@ async function goPage(p) {
   $('#ov').scrollTop = 0;
   const j = ov.jobs[p - 1];
   prog.textContent = `${ov.pages > 1 ? `${p} / ${ov.pages}　` : ''}${jobTitle(j)}` +
-    (c.whole ? '' : `　線の違い ${c.lines}か所・文字の違い ${c.text}か所${c.warped ? '（スキャンの傾き・伸び縮みを直して比較。スキャンは文字が読めないので、文字の比較はしていません）' : ''}${shiftNote(c)}`);
+    (c.whole ? '' : `　線の違い ${c.lines}か所・文字の違い ${c.text}か所${c.vector ? `（線データで比較。${(VEC_TOL / 72 * 25.4).toFixed(1)}mm以内のずれは同じ線とみなしています）` : '（画像で比較）'}${c.warped ? '（スキャンの傾き・伸び縮みを直して比較。スキャンは文字が読めないので、文字の比較はしていません）' : ''}${shiftNote(c)}`);
   renderStrip();
   // 次のページを先に描いておく（押したらすぐ出るように）
   if (p < ov.pages && !ov.cache.has(p + 1)) setTimeout(() => { if (ov.page === p && my === ov.seq) prefetch(p + 1); }, 300);
@@ -699,6 +723,7 @@ function shiftNote(c) {
   const parts = [];
   if (c.shift.dx || c.shift.dy) parts.push(`全体の位置ずれ ${c.shift.dx}, ${c.shift.dy}px`);
   if (c.moved) parts.push(`用紙の中で動いた図 ${c.moved}か所`);
+  if (c.nudged) parts.push(`数pxずれただけの線 ${c.nudged}か所`);
   return parts.length ? `（${parts.join('・')}を合わせて比較）` : '';
 }
 
