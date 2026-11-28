@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>グランOS｜日照3D</title>
+<meta name="theme-color" content="#F6AB00">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Poppins:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="gran-os-base.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#">
+    <svg class="mark" viewBox="0 0 192 192" aria-hidden="true"><g fill="#F6AB00">
+      <rect x="0" y="0" width="192" height="44" rx="6"></rect>
+      <rect x="0" y="0" width="44" height="192" rx="6"></rect>
+      <rect x="70" y="74" width="122" height="44" rx="6"></rect>
+      <rect x="70" y="148" width="122" height="44" rx="6"></rect>
+      <rect x="70" y="74" width="46" height="118"></rect>
+    </g></svg>
+    <span><span class="en">GRANHOUSE</span><span class="jp">日照3D</span></span>
+  </a>
+  <nav class="nav" aria-label="視点">
+    <a href="#" data-v="town" class="active" aria-current="page">TOWN</a>
+    <a href="#" data-v="bird">SITE</a>
+    <a href="#" data-v="top">PLAN</a>
+    <a href="#" data-v="eye">EYE</a>
+  </nav>
+  <div class="sync"><a class="btn btn-sm" id="toplan" href="plan.html">配置図で描く</a><select class="sitesel" id="sitesel" aria-label="敷地を選ぶ" hidden></select><span id="srcl"><i class="dot"></i>地理院データ</span></div>
+</header>
+
+<main class="app">
+  <section class="card stage-card" id="stagecard" aria-label="3D表示">
+    <div class="stage" id="stage">
+      <div class="load" id="load">街を組み立てています…</div>
+      <div class="hud-tl">
+        <div class="glass pill accent"><span class="k" id="centerk">敷地の日照</span><span class="v" id="center">-</span></div>
+        <div class="glass pill"><span class="k" id="sunk">太陽の高さ</span><span class="v" id="sunv">-</span></div>
+        <div class="glass legend" id="legend">敷地の直射日照時間<div class="bar"></div><div class="ends"><span id="lmin">0h</span><span id="lmax">10h</span></div></div>
+      </div>
+      <div class="glass clock" aria-live="off">
+        <div class="t" id="tout">10:00</div>
+        <div class="d" id="cdate">12/22 冬至</div>
+        <svg id="arc" viewBox="0 0 150 44" aria-hidden="true"></svg>
+      </div>
+      <div class="glass dock">
+        <div class="selrow" id="selrow" hidden>
+          <span class="selk" id="selk">-</span>
+          <div class="stepper"><button type="button" id="fdown" aria-label="1階低くする">−</button><b id="fval">-</b><button type="button" id="fup" aria-label="1階高くする">＋</button></div>
+          <button type="button" class="ib" id="freset">推定に戻す</button>
+          <button type="button" class="ib" id="selx" aria-label="建物を選ぶのをやめる"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="topline">
+          <div class="seasons" role="group" aria-label="季節"><button type="button" class="on" data-d="12-22">冬至</button><button type="button" data-d="03-20">春分</button><button type="button" data-d="06-21">夏至</button><button type="button" data-d="09-23">秋分</button></div>
+          <div class="icons">
+            <label class="ib" title="日付を選ぶ"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg><input type="date" id="date" aria-label="日付を選ぶ"></label>
+            <button type="button" class="ib" id="viewb" aria-label="視点を切り替え"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg><span id="viewl">街全体</span></button>
+            <button type="button" class="ib" id="planb" aria-pressed="false" aria-label="計画の建物を置く" title="計画の建物を置く"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg></button>
+            <button type="button" class="ib" id="heat" aria-pressed="false" aria-label="日照時間マップ" title="日照時間マップ"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 4 8l8 4 8-4-8-4z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg></button>
+            <button type="button" class="ib" id="uib" aria-label="パネルの表示を切り替え"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
+        <div class="tlrow">
+          <button type="button" class="playb" id="play" aria-pressed="false" aria-label="1日を再生">▶</button>
+          <div class="tl">
+            <input type="range" id="time" class="tlr" min="300" max="1260" step="5" value="600" aria-label="時刻">
+            <div class="ticks" aria-hidden="true"><span style="left:6.25%">6</span><span style="left:25%">9</span><span style="left:43.75%">12</span><span style="left:62.5%">15</span><span style="left:81.25%">18</span></div>
+          </div>
+          <button type="button" class="fullb2" id="full" aria-pressed="false" aria-label="3Dを拡大"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="phead">
+    <div>
+      <div class="kicker">Sunlight</div>
+      <div class="title"><span class="big" aria-hidden="true">Sunlight</span><h1 id="sitename">日照3D</h1></div>
+    </div>
+    <div class="sub"><span id="sitenote">-</span> <span id="cnt" class="num">-</span>棟。</div>
+  </div>
+  <section class="summary" aria-label="集計">
+    <div class="card stat accent"><span class="k" id="center2k">敷地中央の日照</span><span class="n" id="center2">-</span><span class="l">選んだ日の直射時間</span></div>
+    <div class="card stat"><span class="k">南中高度</span><span class="n" id="noon">-</span><span class="l">正午ごろの太陽の高さ</span></div>
+    <div class="card stat"><span class="k">日の出</span><span class="n" id="rise">-</span><span class="l">地形を考えない理論値</span></div>
+    <div class="card stat"><span class="k">日の入</span><span class="n" id="set">-</span><span class="l">地形を考えない理論値</span></div>
+  </section>
+
+  <section class="tools">
+    <div class="card" id="plancard">
+      <h2>計画の建物を置いて比べる</h2>
+      <p class="lead">敷地に家の箱を置くと、南の庭と1階LDKの窓（南の面のまん中・床から1.2m）に何時間日が当たるかを、平屋と2階建てで比べます。3Dの箱は指やマウスで引っぱって動かせます。建物の形を自分で描くときは<a href="plan.html" id="toplan2">配置図</a>で外周を描き、「配置図の形」を選びます。</p>
+      <div class="seg" role="group" aria-label="計画の建物"><button type="button" data-pf="0" aria-pressed="true">置かない</button><button type="button" data-pf="1" aria-pressed="false">平屋</button><button type="button" data-pf="2" aria-pressed="false">2階建て</button><button type="button" data-pf="3" aria-pressed="false">配置図の形</button></div>
+      <p class="tip" id="drawnote"></p>
+      <div class="sliders" id="psl" aria-disabled="true">
+        <label for="pw">間口（東西）</label><input type="range" id="pw" min="5" max="20" step="0.1"><output id="pwo">-</output>
+        <label for="pd">奥行（南北）</label><input type="range" id="pd" min="4" max="15" step="0.1"><output id="pdo">-</output>
+        <label for="pu">東西の位置</label><input type="range" id="pu" step="0.1"><output id="puo">-</output>
+        <label for="pn">北の境界から</label><input type="range" id="pn" step="0.1"><output id="pno">-</output>
+      </div>
+      <table class="cmp" id="cmp" hidden>
+        <thead><tr><th></th><th>冬至</th><th>春分</th><th>夏至</th></tr></thead>
+        <tbody id="cmpb"></tbody>
+      </table>
+      <p class="tip" id="cmptip"></p>
+      <h2 class="szh">置いた建物の大きさ</h2>
+      <div id="sizebox"></div>
+    </div>
+    <div class="card">
+      <h2>敷地に影を落とす建物</h2>
+      <p class="lead" id="shlead">選んだ日に、敷地へ長く影を落としている建物です。高さは推定なので、実際の階数が分かったら「選ぶ」から直してください（3Dで建物を押しても選べます）。</p>
+      <ul class="shades" id="shades"><li class="busy">計算しています…</li></ul>
+      <p class="tip" id="fixed"></p>
+    </div>
+  </section>
+
+  <section class="card about">
+    <ul class="notes">
+      <li>道路・水路は国土地理院ベクトルタイルから、建物は国土地理院ベクトルタイルまたは3D都市モデル（Project PLATEAU・国土交通省）から、半径約330mを取得</li>
+      <li id="hnote">高さは推定</li>
+      <li id="lotnote">-</li>
+      <li id="terrnote" hidden>-</li>
+      <li>木と車は雰囲気用で、日照計算には含めない。スマホでは1本の指で回す・2本の指で寄る。ページのスクロールは3Dの外側で</li>
+    </ul>
+  </section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="js/sun.js"></script>
+<script src="js/size.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

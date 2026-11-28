@@ -1,3 +1,6 @@
 node_modules/
 .env
 .DS_Store
+# 日照3D の敷地データ（お客様の敷地の位置・形）は入れない
+gran-sun3d/public/sites/
+gran-sun3d/gsi/
