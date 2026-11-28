@@ -33,8 +33,10 @@ function lotAngle(P) {
   P.forEach((p, i) => { const q = P[(i + 1) % P.length], L = D.dist(p, q); if (L > best) { best = L; let a = Math.atan2(q[1] - p[1], q[0] - p[0]) / D.R; while (a > 45) a -= 90; while (a < -45) a += 90; ang = a; } });
   return Math.round(ang * 10) / 10;
 }
+// 直した高さの保存先。建物のデータ（地理院／PLATEAU）が変わると番号も変わるので分ける
+const hKey = () => 'gos-sun-h-' + SITE + (SD && SD.src && SD.src !== '地理院' ? '-pl' : '');
 // まわりの建物の高さ（3Dのページで直したものを使う）
-function loadHeights() { const H = store.get('gos-sun-h-' + SITE) || {}; OCC = SD.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h); }); }
+function loadHeights() { const H = store.get(hKey()) || {}; OCC = SD.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h); }); }
 function loadSiteData(data, key) {
   SD = data; SITE = key; LOT = data.lot; ANG = lotAngle(LOT);
   store.set('gos-sun-site', key);
@@ -420,7 +422,7 @@ function drawShadows() {
 // 3Dのページで日付・時刻や隣家の高さを変えたら、こちらも合わせる
 addEventListener('storage', e => {
   if (e.key === TK) { syncShadeUI(); draw(); }
-  if (SD && e.key === 'gos-sun-h-' + SITE) { loadHeights(); later(calc, 300); draw(); }
+  if (SD && e.key === hKey()) { loadHeights(); later(calc, 300); draw(); }
   if (SD && e.key === saveKey()) { DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; hud(); draw(); later(calc, 300); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && SD) { loadHeights(); syncShadeUI(); draw(); later(calc, 300); } });

@@ -91,10 +91,12 @@ let D = null, LOT = null, lotC = { x: 0, z: 0 }, lotBox = null, B = [], H = {}, 
 let siteG = null, cityG = null, selLine = null, planG = null, lotMesh = null;
 const lotArea = P => Math.abs(P.reduce((s, p, i) => { const q = P[(i + 1) % P.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
 
+// 直した高さの保存先。建物のデータ（地理院／PLATEAU）が変わると番号も変わるので分ける
+const hKey = () => 'gos-sun-h-' + SITE + (D && D.src && D.src !== '地理院' ? '-pl' : '');
 // 建物の種類と、階数⇔高さ
 const KIND = { w: '木造', s: '鉄骨・RCなど', l: '大きい建物', n: '屋根だけ（車庫など）' };
 const MAXF = { w: 3, s: 10, l: 6, n: 2 };
-function floorsOf(b, h) { if (b.k === 'w') return h < 4.5 ? 1 : h < 7.6 ? 2 : 3; if (b.k === 'n') return h < 4.5 ? 1 : 2; return Math.max(1, Math.round((h - .5) / 3.5)); }
+function floorsOf(b, h) { if (b.fl && Math.abs(h - b.h) < .05) return b.fl; if (b.k === 'w') return h < 4.5 ? 1 : h < 7.6 ? 2 : 3; if (b.k === 'n') return h < 4.5 ? 1 : 2; return Math.max(1, Math.round((h - .5) / 3.5)); }
 function heightFor(b, f) { if (b.k === 'w') return [0, 3.3, 6.2, 9.1][f]; if (b.k === 'n') return 3 * f; return 3.5 * f + .5; }
 const hOf = i => H[i] != null ? H[i] : B[i].h;
 const occOf = (b, h) => S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h);
@@ -128,7 +130,7 @@ function rebuildCity() {
 
 function buildSite(data, key) {
   D = data; SITE = key; LAT = D.lat; LON = D.lon; B = D.b;
-  H = store.get('gos-sun-h-' + key) || {};
+  H = store.get(hKey()) || {};
   rnd0 = 12345;
   if (siteG) { scene.remove(siteG); disposeTree(siteG); cityG = null; selLine = null; planG = null; }
   siteG = new THREE.Group(); scene.add(siteG);
@@ -137,6 +139,11 @@ function buildSite(data, key) {
   light.target.position.set(lotC.x, 0, lotC.z);
   $('cnt').textContent = B.length; $('sitename').textContent = (D.name || '敷地') + ' 日照3D'; $('sitenote').textContent = D.note || '';
   $('lotnote').textContent = D.lotNote || '敷地の形は地図からの概算（測量図ではない）';
+  const meas = B.some(b => b.m);
+  $('srcl').innerHTML = `<i class="dot"></i>${meas ? '実測の高さ（PLATEAU）' : '地理院データ'}`;
+  $('hnote').textContent = D.hNote || '高さは推定：木造2階6m前後＋切妻屋根、平屋3.3m、堅ろう建物9〜16m、大型建物6.5〜9m。直した高さはこの端末に残ります';
+  $('shlead').textContent = meas ? '選んだ日に、敷地へ長く影を落としている建物です。高さは航空測量の実測です（PLATEAU）。建て替えなどで変わっていたら「選ぶ」から直せます（3Dで建物を押しても選べます）。' : '選んだ日に、敷地へ長く影を落としている建物です。高さは推定なので、実際の階数が分かったら「選ぶ」から直してください（3Dで建物を押しても選べます）。';
+  $('freset').textContent = meas ? '実測に戻す' : '推定に戻す';
   document.title = 'グランOS｜日照3D ' + (D.name || '');
   // 道路・縁石・水路
   const roads = merge(D.r.map(r => paint(ribbon(r.p, r.w, .03), '#ffffff')));
@@ -303,13 +310,14 @@ function select(i) {
   const g = prism(b.p, h + (b.r === 'g' ? b.o.W / 2 * .45 : 0)); selLine = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0xf7890a, depthTest: false })); g.dispose();
   selLine.renderOrder = 10; scene.add(selLine);
   const fixed = H[i] != null;
-  $('selk').innerHTML = `${whereOf(i)}の${KIND[b.k] || '建物'}<small>${fixed ? '直した高さ' : '推定'} ${h.toFixed(1)}m${fixed ? '（推定 ' + b.h.toFixed(1) + 'm）' : ''}</small>`;
+  const base = b.m ? `実測 ${b.mt.toFixed(1)}m` : `推定 ${b.h.toFixed(1)}m`;
+  $('selk').innerHTML = `${whereOf(i)}の${KIND[b.k] || '建物'}<small>${fixed ? `直した高さ ${h.toFixed(1)}m（${base}）` : base + (b.m && b.fl ? `・${b.fl}階` : '')}</small>`;
   $('fval').textContent = f + '階'; $('fdown').disabled = f <= 1; $('fup').disabled = f >= (MAXF[b.k] || 6);
   $('freset').hidden = !fixed;
 }
 function setHeight(i, h) {
   if (h == null || Math.abs(h - B[i].h) < .05) delete H[i]; else H[i] = Math.round(h * 10) / 10;
-  store.set('gos-sun-h-' + SITE, H); rebuildCity(); select(i); newDay(); later('cmp', comparePlans, 300); fixedNote();
+  store.set(hKey(), H); rebuildCity(); select(i); newDay(); later('cmp', comparePlans, 300); fixedNote();
 }
 $('fdown').addEventListener('click', () => { if (sel >= 0) setHeight(sel, heightFor(B[sel], floorsOf(B[sel], hOf(sel)) - 1)); });
 $('fup').addEventListener('click', () => { if (sel >= 0) setHeight(sel, heightFor(B[sel], floorsOf(B[sel], hOf(sel)) + 1)); });
@@ -317,8 +325,8 @@ $('freset').addEventListener('click', () => { if (sel >= 0) setHeight(sel, null)
 $('selx').addEventListener('click', () => select(-1));
 function fixedNote() {
   const ks = Object.keys(H);
-  $('fixed').innerHTML = ks.length ? `高さを直した建物：${ks.length}棟。<button type="button" class="btn btn-sm" id="fixall">すべて推定に戻す</button>` : '';
-  if (ks.length) $('fixall').addEventListener('click', () => { H = {}; store.set('gos-sun-h-' + SITE, H); rebuildCity(); select(-1); newDay(); later('cmp', comparePlans, 300); fixedNote(); });
+  $('fixed').innerHTML = ks.length ? `高さを直した建物：${ks.length}棟。<button type="button" class="btn btn-sm" id="fixall">すべて元の高さに戻す</button>` : '';
+  if (ks.length) $('fixall').addEventListener('click', () => { H = {}; store.set(hKey(), H); rebuildCity(); select(-1); newDay(); later('cmp', comparePlans, 300); fixedNote(); });
 }
 
 // 敷地に影を落とす建物（選んだ日・敷地を2m間隔で見て、建物ごとに影になる時間の平均）
@@ -336,7 +344,7 @@ function shadeList() {
     });
   }
   const top = [...mins.keys()].filter(i => mins[i] >= 10).sort((a, b) => mins[b] - mins[a]).slice(0, 5);
-  $('shades').innerHTML = top.length ? top.map(i => { const b = B[i], h = hOf(i); return `<li><span class="who">${whereOf(i)}の${KIND[b.k] || '建物'}${H[i] != null ? '<span class="chip chip-green">直した</span>' : ''}<small>${H[i] != null ? '' : '推定 '}${floorsOf(b, h)}階・${h.toFixed(1)}m</small></span><span class="t">${hmJ(mins[i] / 60)}</span><button type="button" class="btn btn-sm" data-pick="${i}">選ぶ</button></li>`; }).join('')
+  $('shades').innerHTML = top.length ? top.map(i => { const b = B[i], h = hOf(i); return `<li><span class="who">${whereOf(i)}の${KIND[b.k] || '建物'}${H[i] != null ? '<span class="chip chip-green">直した</span>' : ''}<small>${H[i] != null ? `${floorsOf(b, h)}階・${h.toFixed(1)}m` : b.m ? `実測 ${b.mt.toFixed(1)}m${b.fl ? '・' + b.fl + '階' : ''}` : `推定 ${floorsOf(b, h)}階・${h.toFixed(1)}m`}</small></span><span class="t">${hmJ(mins[i] / 60)}</span><button type="button" class="btn btn-sm" data-pick="${i}">選ぶ</button></li>`; }).join('')
     : '<li class="busy">この日は、まわりの建物の影はほとんどかかりません。</li>';
   $('shades').querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => { select(+b.dataset.pick); if (!full) $('stagecard').scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
 }

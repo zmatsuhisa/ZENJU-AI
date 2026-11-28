@@ -1,7 +1,9 @@
 """extract.py の area.json と敷地の設定から、画面で読む敷地データ（sites/<記号>.json）を作る。
 
 使い方:
-  python3 tools/build_data.py --area <area.json> --site <敷地の設定.json> --out public/sites/<記号>.json
+  python3 tools/build_data.py --area <area.json> --site <敷地の設定.json> --out public/sites/<記号>.json [--plateau <plateau.json>]
+
+--plateau を付けると、建物は PLATEAU（tools/plateau.py）の形と実測の高さを使う（道路・水路は地理院のまま）。
 
 敷地の設定（リポジトリの外に置く）:
   {
@@ -80,6 +82,7 @@ def main():
     ap.add_argument('--site', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--seed', type=int, default=7)
+    ap.add_argument('--plateau', help='tools/plateau.py の出力。あれば建物はこちらを使う')
     a = ap.parse_args()
     d = json.load(open(a.area))
     site = json.load(open(a.site))
@@ -88,7 +91,32 @@ def main():
 
     B = []
     removed = 0
-    for b in d['b']:
+    PL = json.load(open(a.plateau)) if a.plateau else None
+    for b in (PL['b'] if PL else []):
+        P = b['p']
+        if len(P) < 3:
+            continue
+        if inpoly(sum(x for x, z in P) / len(P), sum(z for x, z in P) / len(P), LOT):
+            removed += 1
+            continue
+        A = area(P)
+        if A < 4:
+            continue
+        o = {'p': P, 'm': 1, 'mt': b['h']}  # m=1：高さは実測（mt は実測の高さそのもの）
+        if b.get('fl'):
+            o['fl'] = b['fl']
+        if b.get('c') in (3003, 3004):          # 屋根だけ（車庫・倉庫など）
+            o.update(k='n', h=b['h'], r='f', wc='#a9a8a3')
+        elif b.get('s') == 601 and b['h'] <= 12:  # 木造：実測の高さを棟とみなし、切妻の軒の高さを逆算
+            ob = obb(P)
+            rise = min(ob['W'] / 2 * .45, 2.5)
+            o.update(k='w', h=round(max(2.4, b['h'] - rise), 2), r='g', wc=random.choice(WALLC), rc=random.choice(ROOFC), o=ob)
+        elif A > 260 and b['h'] < 10:
+            o.update(k='l', h=b['h'], r='f', wc=random.choice(['#d6d3cc', '#c4c1ba', '#e0ddd6']))
+        else:
+            o.update(k='s', h=b['h'], r='f', wc=random.choice(['#d8d6d0', '#c9c6bf', '#e2ded6', '#bcbab4']))
+        B.append(o)
+    for b in ([] if PL else d['b']):
         P = b['p'][:-1] if b['p'][0] == b['p'][-1] else b['p']
         if len(P) < 3:
             continue
@@ -114,6 +142,8 @@ def main():
     EDGE = [r['p'] for r in d['r'] if r['ftCode'] in (2201, 2203)]
     WA = [w['p'] for w in d['w']]
     out = {'name': site.get('name', ''), 'note': site.get('note', ''), 'lotNote': site.get('lotNote', ''),
+           'src': (PL.get('src') or 'PLATEAU') if PL else '地理院',
+           'hNote': '建物の形と高さは3D都市モデル（PLATEAU・国土交通省）の実測。木造は実測の高さを棟とし、4.5寸の切妻で軒の高さを逆算' if PL else '',
            'lat': d.get('lat', site.get('lat')), 'lon': d.get('lon', site.get('lon')),
            'labels': site.get('labels', []), 'lot': LOT, 'b': B, 'r': RD, 'e': EDGE, 'w': WA}
     json.dump(out, open(a.out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))

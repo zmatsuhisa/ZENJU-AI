@@ -54,6 +54,17 @@ npm test                                 # 太陽の位置・影の判定・計�
    ```
 4. `sites/index.json` に足す
 
+### 建物を PLATEAU（実測の高さ）にする
+PLATEAU（国交省の3D都市モデル）の建物がある市町村では、建物の形と高さを航空測量の実測にできる。
+```
+python3 tools/plateau.py --lat <緯度> --lon <経度> --cache <CityGMLのフォルダ> --out <plateau.json> --download
+python3 tools/build_data.py --area <area.json> --site <敷地の設定.json> --plateau <plateau.json> --out <SITESのフォルダ>/<記号>.json
+```
+- 敷地まわりの3次メッシュ（約1km四方）の建築物 CityGML を、PLATEAU のデータカタログ API で探して取ってくる（無料・登録不要）
+- 実測の高さ（measuredHeight）・屋根の外周（lod0RoofEdge）・地上階数・構造を使う。木造（12m以下）は実測の高さを棟とみなし、4.5寸の切妻で軒の高さを逆算する
+- 画面では「実測」と出る。直した高さは地理院版と別に残す（建物の番号が変わるため）
+- 出典の表示：3D都市モデル（Project PLATEAU）国土交通省
+
 ## 決まりごと
 - 座標は 原点＝ピン位置、x=東、z=南（three.js では -z が北）、単位 m
 - 建物の高さは地理院データにないので推定（木造2階6m前後＋切妻・22%は平屋3.3m、堅ろう9〜16m、大型6.5〜9m、無壁舎3m）
@@ -73,7 +84,8 @@ public/js/app.js    3Dの組み立てと操作（three.js r128）
 public/js/draw.js   手で描いた線を直線・角・マス目にそろえる計算（画面とテストで共用）
 public/js/plan.js   配置図の描画と操作
 tools/extract.py    地理院タイル → area.json
-tools/build_data.py area.json＋敷地の設定 → sites/<記号>.json
+tools/build_data.py area.json＋敷地の設定（＋plateau.json）→ sites/<記号>.json
+tools/plateau.py    PLATEAU の建築物 CityGML → plateau.json（建物の形と実測の高さ）
 server.js           パソコンで開くための小さなサーバー
 test/*.test.js      計算のテスト（19件）
 ```
