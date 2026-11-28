@@ -53,7 +53,9 @@ export function diffPdf(oldDoc, newDoc, map = null) {
       for (const d of restB) {
         if (d.used) continue;
         const dd = dist(c, d);
-        if (dd < bd && dd <= NEAR && similar(c.text, d.text)) { best = d; bd = dd; }
+        // 形が似ている（W1600→W1650）か、ほぼ同じ場所に書いてある（洋室2→書斎）なら「書き換え」
+        const same = dd <= Math.min(c.h || 10, d.h || 10) * 0.8;
+        if (dd < bd && dd <= NEAR && (same || similar(c.text, d.text))) { best = d; bd = dd; }
       }
       if (best) {
         best.used = c.used = true;
@@ -92,13 +94,29 @@ export function diffXlsx(oldDoc, newDoc) {
   return out;
 }
 
+// 2段目の見出しに使う短い言葉（「寸法」の下の W・H など）
+const SUB_HEAD = /^(W|H|D|幅|高さ|奥行|巾|数量|単位|単価|金額|mm)$/i;
+
+/**
+ * 表の見出しと本文の始まり。見出しが2段（「寸法」の下に W・H）のときは、2段目を見出しに足す。
+ * @returns {{h:number, header:string[], key:number, start:number}} start＝本文の最初の行（0始まり）
+ */
 export function sheetLayout(sheet) {
   const h = findHeaderRow(sheet.rows);
   const header = h >= 0 ? sheet.rows[h].map(c => String(c.v || '')) : [];
-  const body = sheet.rows.slice(h + 1);
+  let start = h + 1;
+  const sub = h >= 0 ? sheet.rows[h + 1] : null;
+  if (sub) {
+    const texts = sub.map(c => (typeof c.v === 'string' ? c.v.trim() : '')).filter(Boolean);
+    if (texts.length && texts.every(t => SUB_HEAD.test(norm(t))) && sub.every(c => typeof c.v !== 'number')) {
+      sub.forEach((c, i) => { const t = typeof c.v === 'string' ? c.v.trim() : ''; if (t) header[i] = t; });
+      start = h + 2;
+    }
+  }
+  const body = sheet.rows.slice(start);
   let key = header.findIndex(t => KEY_HEAD.test(t));
   if (key < 0) key = guessKeyColumn(body);
-  return { h, header, key };
+  return { h, header, key, start };
 }
 
 function guessKeyColumn(body) {
@@ -119,8 +137,8 @@ function diffSheet(a, b) {
   const la = sheetLayout(a), lb = sheetLayout(b);
   const header = lb.header.length ? lb.header : la.header;
   const colName = c => header[c] || colLetter(c);
-  const bodyA = a.rows.slice(la.h + 1).map((r, i) => ({ r, n: la.h + 2 + i }));
-  const bodyB = b.rows.slice(lb.h + 1).map((r, i) => ({ r, n: lb.h + 2 + i }));
+  const bodyA = a.rows.slice(la.start).map((r, i) => ({ r, n: la.start + 1 + i }));
+  const bodyB = b.rows.slice(lb.start).map((r, i) => ({ r, n: lb.start + 1 + i }));
   const nonEmpty = x => x.r.some(c => c.v !== '' || c.f);
 
   let pairs; // [[rowA|null, rowB|null]]
