@@ -122,3 +122,16 @@ test('寸法を守る：角の寸法は、角を引っぱっても元の所に�
   const del = D.dimsAfterDelete(dims, 3, 4);
   assert.equal(del.length, 2);
 });
+
+test('建物の大きさ：総2階 9.1×7.28 は 1階 約20坪・延べ 約40坪、境界と隣家までの距離', () => {
+  const Z = require('../public/js/size.js');
+  const lot = [[0, 0], [20, 0], [20, 25], [0, 25]];
+  const P = [[2, 1.1], [11.1, 1.1], [11.1, 8.38], [2, 8.38]];
+  const s = Z.sizeInfo([{ p: P, f: 2, eave: 6.2, top: 7.8 }], lot, [{ p: [[2, 28], [10, 28], [10, 36], [2, 36]], h: 6.4 }], 0, 31.3);
+  assert.ok(Math.abs(s.a1 - 66.248) < .01 && Math.abs(s.tsubo1 - 20.04) < .01, `1階 ${s.a1}㎡ ${s.tsubo1}坪`);
+  assert.ok(Math.abs(s.tsuboTotal - 40.08) < .02);
+  assert.ok(Math.abs(s.w - 9.1) < 1e-9 && Math.abs(s.d - 7.28) < 1e-9, '間口と奥行');
+  assert.ok(Math.abs(s.gaps['北'] - 1.1) < 1e-9 && Math.abs(s.gaps['西'] - 2) < 1e-9, '北側1.1m・西側2m');
+  assert.ok(Math.abs(s.neigh['南'].d - (28 - 8.38)) < 1e-9, '南の家まで');
+  assert.ok(Math.abs(s.neigh['南'].shadow - 6.4 / Math.tan(31.3 * Math.PI / 180)) < 1e-9, '冬至の正午の影の長さ');
+});

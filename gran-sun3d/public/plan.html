@@ -121,6 +121,11 @@
       <p class="tip">等高線は国土地理院の5mメッシュ（航空レーザー測量）から引いた地面の高さで、数字は標高（m）です。盛土を入れると、計画の建物・南の庭・LDKの窓がその分高くなって計算されます（3Dにも出ます）。</p>
       <p class="tip">マス目の 910 は尺モジュール（910mm）、455 はその半分。辺の長さは mm で出ます。境界から50cmの線は、民法で建物を離す目安です。</p>
     </div>
+    <div class="card sizecard">
+      <h2>建物の大きさ</h2>
+      <p class="lead">描いた建物の床面積や外形、境界・隣の家までの距離です。描いたり直したりすると、すぐに変わります。</p>
+      <div id="sizebox"></div>
+    </div>
   </section>
 
   <section class="card about">
@@ -138,6 +143,7 @@
 </main>
 <script src="js/sun.js"></script>
 <script src="js/draw.js"></script>
+<script src="js/size.js"></script>
 <script src="js/plan.js"></script>
 </body>
 </html>

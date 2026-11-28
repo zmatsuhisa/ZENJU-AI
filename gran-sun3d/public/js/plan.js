@@ -240,7 +240,15 @@ const opts = closed => ({ closed, step: SET.straight ? SET.step : 0, angle: ANG,
 const shape = (raw, closed) => SET.straight ? (D.straighten(raw, opts(closed)) || raw) : raw;
 
 // ---------- 数字 ----------
+// 建物の大きさ（下のカード）
+function updateSize() {
+  if (!SD) return;
+  const bl = DRAWN.bldgs.map(b => ({ p: b.p, f: b.f, eave: S.drawHeight(b.f) - 1, top: S.drawHeight(b.f) }));
+  const nb = OCC.map(o => ({ p: o.p, h: o.h - (o.base || 0) }));
+  $('sizebox').innerHTML = window.Size.html(bl.length ? window.Size.sizeInfo(bl, LOT, nb, ANG, S.dayInfo(YEAR + '-12-22', SD.lat, SD.lon).noon) : null);
+}
 function hud() {
+  updateSize();
   const a = DRAWN.bldgs.reduce((s, b) => s + D.area(b.p), 0);
   $('barea').innerHTML = a ? `${a.toFixed(1)}<small>㎡（${(a * .3025).toFixed(1)}坪）</small>` : '-';
   $('bratio').innerHTML = a ? `${(a / lotArea * 100).toFixed(1)}<small>％</small>` : '-';

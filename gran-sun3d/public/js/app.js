@@ -444,7 +444,7 @@ function initPlan() {
   if (DRAWN.bldgs.length && (!saved || saved.sig !== JSON.stringify(DRAWN.bldgs))) plan.f = 3;
   $('pu').min = frame.u0.toFixed(1); $('pu').max = frame.u1.toFixed(1);
   $('pn').min = 0; $('pn').max = Math.max(1, Dp - 3).toFixed(1);
-  syncPlanUI(); drawPlan(); later('cmp', comparePlans, 400);
+  syncPlanUI(); drawPlan(); updateSize(); later('cmp', comparePlans, 400);
 }
 function clampPlan() {
   const { w, d } = plan.size[plan.f === 1 ? 1 : 2];
@@ -492,7 +492,17 @@ function drawDrawn() {
   const st = DRAWN.win || S.autoWindow(drawnBldgs(), plan.angle);
   if (st) { const m = new THREE.Mesh(new THREE.SphereGeometry(.35, 16, 8), new THREE.MeshBasicMaterial({ color: 0xf7890a, toneMapped: false })); m.position.set(st[0], S.lotGround(st[0], st[1]) + 1.2, st[1]); planG.add(m); label(planG, 'LDK', st[0], st[1], 2.2, 3); }
 }
+// 置いた建物の大きさ（計画の建物のカードの下）
+function updateSize() {
+  if (!LOT) return;
+  let bl = [];
+  if (plan.f === 3) bl = drawnBldgs().map(b => ({ p: b.p, f: b.f, eave: b.h - 1, top: b.h }));
+  else if (plan.f) { const a = planArgs(), top = S.planHeight(a.floors, a.d) + a.d / 2 * .45 / 2; bl = [{ p: planBox(), f: a.floors, eave: top - a.d / 2 * .45, top }]; }
+  const nb = B.map((b, i) => ({ p: b.p, h: OCC[i].h - (OCC[i].base || 0) }));
+  $('sizebox').innerHTML = window.Size.html(bl.length ? window.Size.sizeInfo(bl, LOT, nb, plan.angle, S.dayInfo(YEAR + '-12-22', LAT, LON).noon) : null);
+}
 function planChanged(calc) {
+  updateSize();
   clampPlan(); syncPlanUI(); drawPlan(); heatFor = ''; if (heat.visible) drawHeat(curDay());
   store.set('gos-sun-plan-' + SITE, { f: plan.f, u: plan.u, n: plan.n, size: plan.size, sig: JSON.stringify(DRAWN.bldgs) });
   if (calc) { later('center', centerHours, 150); later('cmp', comparePlans, 400); later('shades', shadeList, 400); }
