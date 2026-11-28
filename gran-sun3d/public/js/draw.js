@@ -130,5 +130,43 @@
     return out;
   }
 
-  return { R, dist, toUV, toXZ, simplify, straighten, snapGrid, area, inPoly, nearestOnSeg, inset };
+
+  // ---------- 寸法で合わせる ----------
+  // 多角形 P の i 番目の辺（P[i]→P[i+1]）の、内側を向いた長さ1の法線
+  function inwardNormal(P, i) {
+    const a = P[i], b = P[(i + 1) % P.length], L = dist(a, b) || 1e-9;
+    let n = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L]; const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if (!inPoly(m[0] + n[0] * .01, m[1] + n[1] * .01, P)) n = [-n[0], -n[1]];
+    return n;
+  }
+  // 点 p の、直線（a を通り内向き法線 n）からの距離（内側が＋）
+  const offsetFrom = (p, a, n) => (p[0] - a[0]) * n[0] + (p[1] - a[1]) * n[1];
+  const move = (P, d) => P.map(p => [p[0] + d[0], p[1] + d[1]]);
+  function rotate(P, c, deg) { const a = deg * R, cs = Math.cos(a), sn = Math.sin(a); return P.map(p => { const x = p[0] - c[0], z = p[1] - c[1]; return [c[0] + x * cs - z * sn, c[1] + x * sn + z * cs]; }); }
+  // 建物 P の辺 be を、敷地 lot の辺 le と平行にする（回す角度がいちばん小さい向きで。辺のまん中を中心に回す）
+  function alignEdge(P, be, lot, le) {
+    const a = P[be], b = P[(be + 1) % P.length], la = lot[le], lb = lot[(le + 1) % lot.length];
+    let d = Math.atan2(lb[1] - la[1], lb[0] - la[0]) / R - Math.atan2(b[1] - a[1], b[0] - a[0]) / R;
+    while (d > 90) d -= 180; while (d < -90) d += 180;
+    return { P: rotate(P, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d), deg: d };
+  }
+  // 今の「辺 be のまん中 ↔ 敷地の辺 le」の距離
+  function edgeGap(P, be, lot, le) { const a = P[be], b = P[(be + 1) % P.length]; return offsetFrom([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], lot[le], inwardNormal(lot, le)); }
+  // 辺 be を敷地の辺 le から d m 離す（建物ごと境界に直角に動かす）。動かした量も返す
+  function placeEdge(P, be, lot, le, d) { const n = inwardNormal(lot, le), t = d - edgeGap(P, be, lot, le), m = [n[0] * t, n[1] * t]; return { P: move(P, m), move: m }; }
+  // 敷地の角 lv に集まる2本の境界（手前の辺 lv-1 と、先の辺 lv）
+  const cornerEdges = (lot, lv) => [(lv - 1 + lot.length) % lot.length, lv];
+  // 建物の角 bv の、敷地の角 lv に集まる2本の境界からの距離
+  function cornerGap(P, bv, lot, lv) { return cornerEdges(lot, lv).map(e => offsetFrom(P[bv], lot[e === lv ? lv : e], inwardNormal(lot, e))); }
+  // 建物の角 bv を、2本の境界から d1・d2 m の所へ（建物ごと動かす）
+  function placeCorner(P, bv, lot, lv, d1, d2) {
+    const [e1, e2] = cornerEdges(lot, lv), n1 = inwardNormal(lot, e1), n2 = inwardNormal(lot, e2), c = lot[lv];
+    const det = n1[0] * n2[1] - n1[1] * n2[0];
+    if (Math.abs(det) < 1e-6) return null; // 2本の境界が一直線
+    const q = [(d1 * n2[1] - d2 * n1[1]) / det, (n1[0] * d2 - n2[0] * d1) / det];
+    const m = [c[0] + q[0] - P[bv][0], c[1] + q[1] - P[bv][1]];
+    return { P: move(P, m), move: m };
+  }
+
+  return { inwardNormal, offsetFrom, rotate, alignEdge, edgeGap, placeEdge, cornerEdges, cornerGap, placeCorner, R, dist, toUV, toXZ, simplify, straighten, snapGrid, area, inPoly, nearestOnSeg, inset };
 });

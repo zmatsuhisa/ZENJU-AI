@@ -50,9 +50,16 @@
           <div class="stepper"><button type="button" id="fdown" aria-label="1階低くする">−</button><b id="fval">-</b><button type="button" id="fup" aria-label="1階高くする">＋</button></div>
           <button type="button" class="ib" id="del">消す</button>
         </div>
+        <div class="selrow dimrow" id="dimrow" hidden>
+          <span class="selk" id="dimk">-</span>
+          <label class="dimin"><span id="dl1">境界から</span><input type="number" id="dv1" inputmode="numeric" step="10" min="0"><small>mm</small></label>
+          <label class="dimin" id="dimin2"><span id="dl2">境界から</span><input type="number" id="dv2" inputmode="numeric" step="10" min="0"><small>mm</small></label>
+          <button type="button" class="ib dkb" id="dimok">決める</button>
+          <button type="button" class="ib" id="dimx" aria-label="寸法をやめる"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
         <div class="topline">
           <div class="seasons tools3" role="group" aria-label="道具">
-            <button type="button" class="on" data-mode="draw">描く</button><button type="button" data-mode="edit">直す</button><button type="button" data-mode="win">LDKの窓</button><button type="button" data-mode="pan">動かす</button>
+            <button type="button" class="on" data-mode="draw">描く</button><button type="button" data-mode="edit">直す</button><button type="button" data-mode="dim">寸法</button><button type="button" data-mode="win">窓</button><button type="button" data-mode="pan">動かす</button>
           </div>
           <div class="icons">
             <button type="button" class="ib" id="close" title="外周を閉じる">閉じる</button>
@@ -107,6 +114,7 @@
     <ul class="notes">
       <li>描く：外周を1本ずつ（一筆でぐるっとでも）描きます。前の線の終わりにつながり、描き始めの点に戻ると閉じます。途中でやめるときは「閉じる」</li>
       <li>直す：角の点を引っぱると動き、辺を引っぱると辺ごと平行に動きます。建物の中を引っぱると建物ごと動きます。建物を押すと階数を変えられます</li>
+      <li>寸法：建物の辺を押してから敷地の境界線を押すと、辺を境界と平行にして「境界から何mm」を決められます。建物の角を押してから敷地の角を押すと、その角に集まる2本の境界それぞれからの距離を決められます。決めた寸法は図に残ります（青い線）</li>
       <li>2本の指（マウスはホイール）で寄る・引く。「動かす」にすると1本の指で図をずらせます</li>
       <li>高さは 平屋 軒3.3m・2階 軒6.2m に、屋根の平均 1.0m を足して計算します。描いた形はこの端末に残り、3Dの「計画の建物」の「配置図の形」で見られます</li>
       <li id="lotnote">-</li>

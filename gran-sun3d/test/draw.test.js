@@ -69,3 +69,24 @@ test('描いた形の日照：L字の建物でも南の庭と窓を数えられ�
   assert.ok(st.win && st.win[1] > -6, '窓は南を向いた辺にある');
   assert.ok(st.ldk > 7);
 });
+
+test('寸法：建物の辺を境界と平行にして、境界から 1,110mm 離す', () => {
+  const lot = [[0, 0], [20, 3], [18, 25], [-1, 22]]; // 少しゆがんだ敷地
+  let P = [[3, 4], [12, 4], [12, 11], [3, 11]];
+  const r = D.alignEdge(P, 0, lot, 0); P = r.P;
+  const a = P[0], b = P[1], th = Math.atan2(b[1] - a[1], b[0] - a[0]), tl = Math.atan2(3, 20);
+  assert.ok(Math.abs(th - tl) < 1e-9, '北の辺が北の境界と平行');
+  P = D.placeEdge(P, 0, lot, 0, 1.11).P;
+  assert.ok(Math.abs(D.offsetFrom(P[0], lot[0], D.inwardNormal(lot, 0)) - 1.11) < 1e-9);
+  assert.ok(Math.abs(D.offsetFrom(P[1], lot[0], D.inwardNormal(lot, 0)) - 1.11) < 1e-9, '辺の両端とも 1,110');
+});
+
+test('寸法：建物の角を、敷地の角から 北側1,100・西側1,500 に置く', () => {
+  const lot = [[0, 0], [20, 0], [20, 25], [0, 25]];
+  const P = [[5, 5], [14, 5], [14, 12], [5, 12]];
+  const r = D.placeCorner(P, 0, lot, 0, 1.5, 1.1); // 角0：手前の辺＝西の境界、先の辺＝北の境界
+  near(r.P[0], [1.5, 1.1], 1e-9);
+  near(r.P[2], [10.5, 8.1], 1e-9);
+  const g = D.cornerGap(r.P, 0, lot, 0);
+  assert.ok(Math.abs(g[0] - 1.5) < 1e-9 && Math.abs(g[1] - 1.1) < 1e-9);
+});

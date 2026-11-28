@@ -125,6 +125,7 @@ body.noscroll .app{z-index:1001}
 /* 配置図のページ */
 .plan-stage{background:#eeece6}
 .plan-stage canvas{touch-action:none;cursor:crosshair}
+.plan-stage .hud-tl{pointer-events:none}
 .hint{position:absolute;right:10px;top:10px;max-width:min(320px,calc(100% - 200px));padding:10px 14px;font-size:12px;font-weight:700;line-height:1.6;color:var(--ink);pointer-events:none}
 .hint[hidden]{display:none}
 .setgrid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center}
@@ -133,8 +134,18 @@ body.noscroll .app{z-index:1001}
 .ib:disabled{opacity:.35;cursor:default}
 .phead .sub .btn{margin-left:8px}
 @media (max-width:760px){
-  .hint{left:auto;right:10px;top:10px;max-width:calc(100% - 150px);font-size:12px;padding:8px 12px}
-  .plan-stage .pill .v{font-size:16px}
+  .hint{left:10px;right:10px;top:auto;bottom:118px;max-width:none;text-align:center;font-size:12px;padding:8px 12px}
+  .plan-stage .hud-tl{grid-auto-flow:column;max-width:calc(100% - 20px)}
+  .plan-stage .pill{padding:6px 10px}
+  .plan-stage .pill .v{font-size:15px}
   .setgrid{grid-template-columns:1fr}
   .setgrid .sk{margin-top:6px}
 }
+.dimrow{flex-wrap:wrap;background:rgba(68,107,235,.08)}
+.dimin{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:var(--ink-2);background:#fff;border-radius:var(--pill);padding:2px 10px 2px 12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.dimin[hidden]{display:none}
+.dimin input{width:72px;border:0;font:inherit;font-family:Poppins,sans-serif;font-size:16px;font-weight:600;text-align:right;padding:6px 2px;background:transparent;color:var(--ink)}
+.dimin input:focus{outline:2px solid var(--orange);border-radius:6px}
+.dimin small{color:var(--sub)}
+.ib.dkb{background:var(--ink);color:#fff}
+@media (max-width:760px){.dimrow .selk{flex-basis:100%}.dimin input{width:60px}.dimin{padding:2px 8px 2px 10px}}
