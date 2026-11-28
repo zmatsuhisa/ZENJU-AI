@@ -50,13 +50,17 @@
           <div class="stepper"><button type="button" id="fdown" aria-label="1階低くする">−</button><b id="fval">-</b><button type="button" id="fup" aria-label="1階高くする">＋</button></div>
           <button type="button" class="ib" id="del">消す</button>
         </div>
-        <div class="selrow dimrow" id="dimrow" hidden>
-          <span class="selk" id="dimk">-</span>
-          <label class="dimin"><span id="dl1">境界から</span><input type="number" id="dv1" inputmode="numeric" step="10" min="0"><small>mm</small></label>
-          <label class="dimin" id="dimin2"><span id="dl2">境界から</span><input type="number" id="dv2" inputmode="numeric" step="10" min="0"><small>mm</small></label>
-          <button type="button" class="ib dkb" id="dimok">決める</button>
-          <button type="button" class="ib" id="dimdel" hidden>外す</button>
-          <button type="button" class="ib" id="dimx" aria-label="寸法をやめる"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <div class="dimrow" id="dimrow" hidden>
+          <ol class="dsteps" id="dsteps" aria-label="寸法の手順"><li data-st="1">種類</li><li data-st="2">建物</li><li data-st="3">敷地</li><li data-st="4">長さ</li></ol>
+          <div class="dbody">
+            <span class="selk" id="dimk">-</span>
+            <div class="dchoice" id="dchoice"><button type="button" class="btn btn-sm" data-dk="e">辺を境界から離す</button><button type="button" class="btn btn-sm" data-dk="c">角を敷地の角から追う</button></div>
+            <label class="dimin" id="dimin1"><span id="dl1">境界から</span><input type="number" id="dv1" inputmode="numeric" step="10" min="0"><small>mm</small></label>
+            <label class="dimin" id="dimin2"><span id="dl2">境界から</span><input type="number" id="dv2" inputmode="numeric" step="10" min="0"><small>mm</small></label>
+            <button type="button" class="ib dkb" id="dimok">決める</button>
+            <button type="button" class="ib" id="dimdel" hidden>外す</button>
+            <button type="button" class="ib" id="dimx">やめる</button>
+          </div>
         </div>
         <div class="shaderow" id="shaderow" hidden>
           <div class="seasons" role="group" aria-label="季節"><button type="button" data-d="12-22" class="on">冬至</button><button type="button" data-d="03-20">春分</button><button type="button" data-d="06-21">夏至</button><button type="button" data-d="09-23">秋分</button></div>
@@ -122,6 +126,11 @@
       <p class="tip">マス目の 910 は尺モジュール（910mm）、455 はその半分。辺の長さは mm で出ます。境界から50cmの線は、民法で建物を離す目安です。</p>
     </div>
     <div class="card sizecard">
+      <h2>決めた寸法</h2>
+      <p class="lead">寸法の道具で決めた寸法です。決めた寸法は、建物を動かしたり形を直したりしても守られます。</p>
+      <ul class="dimlist" id="dimlist"><li class="busy">まだありません。下の道具の「寸法」から決められます。</li></ul>
+    </div>
+  <div class="card sizecard">
       <h2>建物の大きさ</h2>
       <p class="lead">描いた建物の床面積や外形、境界・隣の家までの距離です。描いたり直したりすると、すぐに変わります。</p>
       <div id="sizebox"></div>

@@ -191,17 +191,27 @@ function drawDims() {
       }
     }
   }));
-  if (mode !== 'dim') return;
-  LOT.forEach(p => dot(p, '#2f6e3a', 5, '#fff'));
-  if (dimPick) {
+  if (mode !== 'dim' || !dimPick) return;
+  const st = dimPick.step, k = dimPick.k, hv = dimHover, soft = 'rgba(68,107,235,.35)';
+  const line = (a, b, col, w) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); path([a, b]); g.stroke(); };
+  if (st <= 2) {
+    // 押せる所：建物の辺（辺を選ぶとき）・建物の角（角を選ぶとき）
+    DRAWN.bldgs.forEach(b => b.p.forEach((p, i) => {
+      if (k !== 'c') line(p, b.p[(i + 1) % b.p.length], soft, 6);
+      if (k !== 'e') dot(p, BLUE, 5, '#fff');
+    }));
+    if (hv && hv.b != null) { const P = DRAWN.bldgs[hv.b].p; if (hv.e != null) line(P[hv.e], P[(hv.e + 1) % P.length], BLUE, 7); if (hv.v != null) dot(P[hv.v], BLUE, 9, '#fff'); }
+  } else {
     const P = DRAWN.bldgs[dimPick.b].p;
-    g.strokeStyle = BLUE; g.lineWidth = 5;
-    if (dimPick.k === 'e') { g.beginPath(); path([P[dimPick.i], P[(dimPick.i + 1) % P.length]]); g.stroke(); }
-    else dot(P[dimPick.i], BLUE, 8, '#fff');
-    if (dimPick.l != null) {
-      if (dimPick.k === 'e') { g.beginPath(); path([LOT[dimPick.l], LOT[(dimPick.l + 1) % LOT.length]]); g.stroke(); }
-      else dot(LOT[dimPick.l], BLUE, 8, '#fff');
+    if (k === 'e') line(P[dimPick.i], P[(dimPick.i + 1) % P.length], BLUE, 7); else dot(P[dimPick.i], BLUE, 9, '#fff');
+    if (st === 3) {
+      LOT.forEach((p, i) => { if (k === 'e') line(p, LOT[(i + 1) % LOT.length], soft, 8); else dot(p, BLUE, 7, '#fff'); });
+      if (hv && hv.l != null) { if (k === 'e') line(LOT[hv.l], LOT[(hv.l + 1) % LOT.length], BLUE, 8); else dot(LOT[hv.l], BLUE, 11, '#fff'); }
+    } else if (dimPick.l != null) {
+      if (k === 'e') line(LOT[dimPick.l], LOT[(dimPick.l + 1) % LOT.length], BLUE, 6); else dot(LOT[dimPick.l], BLUE, 10, '#fff');
     }
+    // 入れた長さで動いたあとの形（点線）
+    if (dimPick.preview) { g.setLineDash([8, 5]); g.strokeStyle = '#f7890a'; g.lineWidth = 2.5; g.beginPath(); path(dimPick.preview, true); g.stroke(); g.setLineDash([]); }
   }
 }
 // 境界の呼び名（内向きの法線と反対の方角）
@@ -262,7 +272,7 @@ function updateSize() {
   $('sizebox').innerHTML = window.Size.html(bl.length ? window.Size.sizeInfo(bl, LOT, nb, ANG, S.dayInfo(YEAR + '-12-22', SD.lat, SD.lon).noon) : null);
 }
 function hud() {
-  updateSize();
+  updateSize(); renderDimList();
   const a = DRAWN.bldgs.reduce((s, b) => s + D.area(b.p), 0);
   $('barea').innerHTML = a ? `${a.toFixed(1)}<small>㎡（${(a * .3025).toFixed(1)}坪）</small>` : '-';
   $('bratio').innerHTML = a ? `${(a / lotArea * 100).toFixed(1)}<small>％</small>` : '-';
@@ -299,10 +309,10 @@ function calc() {
 }
 
 // ---------- 操作 ----------
-const HINT = { draw: () => cur ? '続けて次の線を描いてください。描き始めの点（白い丸）に戻ると閉じます' : '外周を1本ずつ描いてください。' + $('hint').dataset.base, edit: () => '角の点・辺・建物を引っぱって直します。建物を押すと階数を変えられます', win: () => 'LDKの窓を置く辺を押してください', dim: () => dimPick ? (dimPick.k === 'e' ? '次に、平行にそろえる敷地の境界線を押してください' : '次に、敷地の角（緑の丸）を押してください') : '建物の辺か角を押してください。辺→境界線で「境界から何mm」、角→敷地の角で「角から何mm」を決めます', pan: () => '1本の指で図をずらします' };
+const HINT = { draw: () => cur ? '続けて次の線を描いてください。描き始めの点（白い丸）に戻ると閉じます' : '外周を1本ずつ描いてください。' + $('hint').dataset.base, edit: () => '角の点・辺・建物を引っぱって直します。建物を押すと階数を変えられます', win: () => 'LDKの窓を置く辺を押してください', dim: () => '下の手順に沿って、決めるもの → 建物 → 敷地 → 長さ の順に選んでください', pan: () => '1本の指で図をずらします' };
 let hintT = 0;
 function showHint(t) { $('hint').textContent = t || HINT[mode](); $('hint').hidden = false; clearTimeout(hintT); hintT = setTimeout(() => $('hint').hidden = true, 3500); }
-function setMode(m) { if (m !== 'dim') closeDim(); mode = m; document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); if (m !== 'draw' && cur) closeCur(); showHint(); hud(); draw(); }
+function setMode(m) { if (m !== 'dim' || mode !== 'dim') closeDim(); mode = m; if (m === 'dim') startDim(); document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); if (m !== 'draw' && cur) closeCur(); showHint(); hud(); draw(); }
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
 function closeCur() {
@@ -496,71 +506,153 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && SD
 // LDK の窓がこの建物のものか（建物の外周から 60cm 以内）
 function winOf(P) { const w = DRAWN.win; if (!w) return false; return P.some((p, k) => D.dist(D.nearestOnSeg(w, p, P[(k + 1) % P.length]).q, w) < .6); }
 function moveB(b, m) { const own = winOf(b.p); b.p = b.p.map(p => [p[0] + m[0], p[1] + m[1]]); if (own) DRAWN.win = [DRAWN.win[0] + m[0], DRAWN.win[1] + m[1]]; }
-function closeDim() { dimPick = null; $('dimrow').hidden = true; }
-function dimTap(w) {
-  const tol = 24 / view.s;
-  if (!dimPick || dimPick.l != null) {
-    const h = hitTest(w);
-    if (!h || h.all) { closeDim(); showHint('建物の辺か角を押してください'); hud(); draw(); return; }
-    sel = h.b; dimPick = h.v != null ? { k: 'c', b: h.b, i: h.v } : { k: 'e', b: h.b, i: h.e };
-    $('dimrow').hidden = true; showHint(); hud(); draw(); return;
-  }
-  const b = DRAWN.bldgs[dimPick.b];
-  if (dimPick.k === 'e') {
-    let best = null; LOT.forEach((a, k) => { const d = D.dist(D.nearestOnSeg(w, a, LOT[(k + 1) % LOT.length]).q, w); if (!best || d < best.d) best = { d, k }; });
-    if (!best || best.d > tol) { showHint('敷地の境界線（緑の線）を押してください'); return; }
-    dimPick.l = best.k; snapshot();
-    // 辺を境界と平行にする（窓もいっしょに回す）。ほかの寸法があるときは回さず、辺のまん中で測る
-    const others = (b.dims || []).filter(d => !(d.k === 'e' && d.be === dimPick.i && d.le === dimPick.l));
-    const own = winOf(b.p), a = b.p[dimPick.i], c = b.p[(dimPick.i + 1) % b.p.length], r = D.alignEdge(b.p, dimPick.i, LOT, dimPick.l);
-    dimPick.par = true;
-    if (Math.abs(r.deg) > .05) {
-      if (others.length) dimPick.par = false;
-      else { b.p = r.P; if (own) DRAWN.win = D.rotate([DRAWN.win], [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], r.deg)[0]; save(); }
-    }
-    openDim(); return;
-  }
-  let best = null; LOT.forEach((p, k) => { const d = D.dist(p, w); if (!best || d < best.d) best = { d, k }; });
-  if (!best || best.d > tol * 1.3) { showHint('敷地の角（緑の丸）を押してください'); return; }
-  dimPick.l = best.k; snapshot(); openDim();
+// 手順：1 決めるもの → 2 建物の辺か角 → 3 敷地の境界線か角 → 4 長さ
+let dimHover = null;
+function startDim(k) { dimPick = { step: k ? 2 : 1, k: k || null }; dimHover = null; renderDim(); draw(); }
+function closeDim() { if (dimPick && dimPick.before) { DRAWN = JSON.parse(dimPick.before); hist.pop(); save(); } dimPick = null; dimHover = null; $('dimrow').hidden = true; }
+function cancelDim() { closeDim(); if (mode === 'dim') startDim(); hud(); draw(); }
+function renderDim() {
+  if (!dimPick) { $('dimrow').hidden = true; return; }
+  const st = dimPick.step, k = dimPick.k;
+  $('dimrow').hidden = false; $('selrow').hidden = true;
+  document.querySelectorAll('#dsteps li').forEach(li => { const n = +li.dataset.st; li.classList.toggle('on', n === st); li.classList.toggle('done', n < st); });
+  $('dchoice').hidden = st !== 1;
+  ['dimin1', 'dimin2', 'dimok'].forEach(id => $(id).hidden = st !== 4);
+  if (st !== 4) $('dimdel').hidden = true;
+  $('dimx').textContent = st === 1 ? '閉じる' : 'やめる';
+  if (st === 1) $('dimk').innerHTML = '何を決めますか？<small>建物の辺や角を、図の上で直接押して始めることもできます</small>';
+  if (st === 2) $('dimk').innerHTML = k === 'c' ? '建物の角を押してください<small>青い丸のどれか</small>' : '建物の辺を押してください<small>青く光っている線のどれか</small>';
+  if (st === 3) $('dimk').innerHTML = k === 'c' ? '敷地の角を押してください<small>青い丸のどれか。その角から境界線に沿って測ります</small>' : '合わせる敷地の境界線を押してください<small>押すと、建物の辺がその境界と平行になります</small>';
+  if (st === 4) openDim();
+  if (st >= 3) focusDim();
 }
+// 選んだ建物の辺や角が、下の手順の欄に隠れない所に来るよう図を寄せる
+function focusDim() {
+  const P = DRAWN.bldgs[dimPick.b].p, a = P[dimPick.i], c = dimPick.k === 'e' ? P[(dimPick.i + 1) % P.length] : a, pts = [a, c];
+  if (dimPick.l != null) pts.push(LOT[dimPick.l]);
+  const m = [pts.reduce((t, p) => t + p[0], 0) / pts.length, pts.reduce((t, p) => t + p[1], 0) / pts.length];
+  const dock = document.querySelector('#stage .dock'), free = Hh - (dock ? dock.offsetHeight + 20 : 120);
+  const [, y] = toS(m); if (y > 60 && y < free - 30) return; // 見えていれば動かさない
+  view.x = m[0]; view.z = m[1] + (Hh / 2 - Math.max(80, free / 2)) / view.s; draw();
+}
+document.querySelectorAll('#dchoice [data-dk]').forEach(b => b.addEventListener('click', () => startDim(b.dataset.dk)));
+$('dimx').addEventListener('click', () => { if (dimPick && dimPick.step === 1) setMode('edit'); else cancelDim(); });
+// 押した所が、今の手順で選べるもの
+function dimTarget(w) {
+  const tol = 24 / view.s, st = dimPick.step, k = dimPick.k;
+  if (st <= 2) {
+    const h = hitTest(w); if (!h || h.all) return null;
+    if (k === 'c' && h.v == null) { // 辺を押した：その辺の近いほうの角
+      if (h.e == null) return null; const P = DRAWN.bldgs[h.b].p, a = h.e, c = (h.e + 1) % P.length; return { b: h.b, v: D.dist(P[a], w) < D.dist(P[c], w) ? a : c };
+    }
+    if (k === 'e' && h.e == null) return null;
+    return h;
+  }
+  if (st === 3) {
+    let best = null;
+    if (k === 'e') LOT.forEach((a, i) => { const d = D.dist(D.nearestOnSeg(w, a, LOT[(i + 1) % LOT.length]).q, w); if (!best || d < best.d) best = { d, l: i }; });
+    else LOT.forEach((p, i) => { const d = D.dist(p, w); if (!best || d < best.d) best = { d, l: i }; });
+    return best && best.d < tol * (k === 'c' ? 1.4 : 1) ? best : null;
+  }
+  return null;
+}
+function dimTap(w) {
+  if (!dimPick) startDim();
+  if (dimPick.step === 4) { cancelDim(); } // 長さを入れている途中に図を押したら、選び直し
+  const st = dimPick.step, t = dimTarget(w);
+  if (st <= 2) {
+    if (!t) { showHint(dimPick.k === 'c' ? '建物の角（青い丸）を押してください' : dimPick.k === 'e' ? '建物の辺（青く光っている線）を押してください' : '建物の辺か角を押してください'); return; }
+    sel = t.b; Object.assign(dimPick, t.v != null ? { k: 'c', b: t.b, i: t.v } : { k: 'e', b: t.b, i: t.e }, { step: 3 });
+    dimHover = null; renderDim(); hud(); draw(); return;
+  }
+  if (st === 3) {
+    if (!t) { showHint(dimPick.k === 'c' ? '敷地の角（青い丸）を押してください' : '敷地の境界線（青く光っている線）を押してください'); return; }
+    dimPick.l = t.l; dimPick.step = 4;
+    if (dimPick.k === 'e') {
+      // 辺を境界と平行にする（窓もいっしょに回す）。ほかの寸法があるときは回さず、辺のまん中で測る
+      const b = DRAWN.bldgs[dimPick.b], others = (b.dims || []).filter(d => !(d.k === 'e' && d.be === dimPick.i && d.le === dimPick.l));
+      const own = winOf(b.p), a = b.p[dimPick.i], c = b.p[(dimPick.i + 1) % b.p.length], r = D.alignEdge(b.p, dimPick.i, LOT, dimPick.l);
+      dimPick.par = true;
+      if (Math.abs(r.deg) > .05) {
+        if (others.length) dimPick.par = false;
+        else { dimPick.before = JSON.stringify(DRAWN); snapshot(); b.p = r.P; if (own) DRAWN.win = D.rotate([DRAWN.win], [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], r.deg)[0]; }
+      }
+    }
+    dimHover = null; renderDim(); hud(); draw();
+  }
+}
+// マウスを近づけた所を光らせる
+cv.addEventListener('pointermove', e => {
+  if (mode !== 'dim' || !dimPick || ptrs.size || dimPick.step > 3) return;
+  const t = dimTarget(toW(...pos(e))), key = JSON.stringify(t);
+  if (key !== JSON.stringify(dimHover)) { dimHover = t; draw(); }
+});
 const toMM = m => Math.round(m * 100) * 10; // 10mm 単位
 function existingDim() { const b = DRAWN.bldgs[dimPick.b]; return (b.dims || []).find(d => dimPick.k === 'e' ? d.k === 'e' && d.be === dimPick.i && d.le === dimPick.l : d.k === 'c' && d.bv === dimPick.i && d.lv === dimPick.l); }
 function openDim() {
   const b = DRAWN.bldgs[dimPick.b], ex = existingDim();
   if (dimPick.k === 'e') {
-    $('dimk').innerHTML = `辺を${sideName(dimPick.l)}と平行にしました<small>境界からの距離を入れて「決める」</small>`;
+    $('dimk').innerHTML = dimPick.par === false ? `${sideName(dimPick.l)}から、辺のまん中までの距離<small>ほかの寸法を決めてあるので、向きは変えません</small>` : `${sideName(dimPick.l)}から、辺までの距離<small>辺を境界と平行にしました。数字を入れると点線の位置に動きます</small>`;
     $('dl1').textContent = sideName(dimPick.l).replace('の境界', '') + 'から'; $('dv1').value = toMM(D.edgeGap(b.p, dimPick.i, LOT, dimPick.l)); $('dimin2').hidden = true;
   } else {
     const [e1, e2] = D.cornerEdges(LOT, dimPick.l), ts = D.cornerAlong(b.p, dimPick.i, LOT, dimPick.l);
-    $('dimk').innerHTML = `敷地の角から、境界線に沿って測ります<small>角どうしはまっすぐ ${mm(D.dist(b.p[dimPick.i], LOT[dimPick.l]))}mm</small>`;
-    $('dl1').textContent = sideName(e1) + 'に沿って'; $('dv1').value = toMM(ts[0]);
-    $('dl2').textContent = sideName(e2) + 'に沿って'; $('dv2').value = toMM(ts[1]); $('dimin2').hidden = false;
+    $('dimk').innerHTML = `敷地の角から、境界線に沿った長さ<small>数字を入れると点線の位置に動きます（角どうしはまっすぐ ${mm(D.dist(b.p[dimPick.i], LOT[dimPick.l]))}mm）</small>`;
+    const nm = e => W < 760 ? sideName(e).replace('側の境界', '') + 'に沿って' : sideName(e).replace('の境界', '') + 'の境界に沿って';
+    $('dl1').textContent = nm(e1); $('dv1').value = toMM(ts[0]);
+    $('dl2').textContent = nm(e2); $('dv2').value = toMM(ts[1]); $('dimin2').hidden = false;
   }
   if (ex) { if (ex.k === 'e') $('dv1').value = toMM(ex.d); else { $('dv1').value = toMM(ex.d1); $('dv2').value = toMM(ex.d2); } }
-  if (dimPick.k === 'e' && dimPick.par === false) $('dimk').innerHTML = `${sideName(dimPick.l)}から（向きは変えず、辺のまん中で測ります）<small>ほかの寸法を決めてあるので回しません</small>`;
   $('dimdel').hidden = !ex;
-  $('dimrow').hidden = false; $('selrow').hidden = true;
-  showHint(dimPick.k === 'e' ? '境界からの距離を mm で入れて「決める」' : 'それぞれの境界線に沿った、角からの長さを mm で入れて「決める」'); draw();
+  dimPick.preview = null;
   setTimeout(() => { try { $('dv1').focus({ preventScroll: true }); $('dv1').select(); } catch (e) {} }, 50);
 }
-function applyDim() {
-  if (!dimPick || dimPick.l == null) return;
+// 入れた長さで動かしたときの形（決めるまでは見本だけ）
+function dimResult() {
   const b = DRAWN.bldgs[dimPick.b], t1 = $('dv1').value, t2 = $('dv2').value, v1 = +t1 / 1000, v2 = +t2 / 1000;
-  if (t1 === '' || !isFinite(v1) || (dimPick.k === 'c' && (t2 === '' || !isFinite(v2)))) { showHint('距離を mm の数字で入れてください'); return; }
+  if (t1 === '' || !isFinite(v1) || (dimPick.k === 'c' && (t2 === '' || !isFinite(v2)))) return null;
   const r = dimPick.k === 'e' ? D.placeEdge(b.p, dimPick.i, LOT, dimPick.l, v1) : D.placeCornerAlong(b.p, dimPick.i, LOT, dimPick.l, v1, v2);
-  if (!r) { showHint('この角では決められません（2本の境界が一直線です）'); return; }
+  if (!r) return null;
   const pk = dimPick;
   const others = (b.dims || []).filter(d => pk.k === 'e' ? !(d.k === 'e' && (d.be === pk.i || d.le === pk.l)) : !(d.k === 'c' && (d.bv === pk.i || d.lv === pk.l)));
-  // ほかの寸法を守れる向きにだけ建物ごと動かし、残りは形を合わせる
-  moveB(b, D.allowedMove(r.move, others, LOT));
-  b.dims = others.concat([pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l, d: v1, par: pk.par !== false } : { k: 'c', bv: pk.i, lv: pk.l, d1: v1, d2: v2, m: 'a' }]);
-  b.p = D.keepDims(b.p, b.dims, LOT);
-  save(); closeDim(); hud(); draw();
+  const m = D.allowedMove(r.move, others, LOT);
+  const dims = others.concat([pk.k === 'e' ? { k: 'e', be: pk.i, le: pk.l, d: v1, par: pk.par !== false } : { k: 'c', bv: pk.i, lv: pk.l, d1: v1, d2: v2, m: 'a' }]);
+  return { m, dims, P: D.keepDims(b.p.map(p => [p[0] + m[0], p[1] + m[1]]), dims, LOT) };
+}
+['dv1', 'dv2'].forEach(id => $(id).addEventListener('input', () => { if (!dimPick || dimPick.step !== 4) return; const r = dimResult(); dimPick.preview = r ? r.P : null; draw(); }));
+function applyDim() {
+  if (!dimPick || dimPick.step !== 4) return;
+  const r = dimResult();
+  if (!r) { showHint('長さを mm の数字で入れてください'); return; }
+  const b = DRAWN.bldgs[dimPick.b];
+  if (!dimPick.before) snapshot();
+  moveB(b, r.m); b.dims = r.dims; b.p = D.keepDims(b.p, b.dims, LOT);
+  dimPick.before = null; save();
   showHint(outside(b.p) ? '動かしました。敷地からはみ出しています' : '寸法どおりに動かしました。この寸法は、あとで直しても守られます');
+  startDim(); hud(); draw();
 }
 $('dimok').addEventListener('click', applyDim);
-$('dimdel').addEventListener('click', () => { const ex = dimPick && existingDim(); if (!ex) return; snapshot(); const b = DRAWN.bldgs[dimPick.b]; b.dims = b.dims.filter(d => d !== ex); save(); closeDim(); hud(); draw(); showHint('寸法を外しました。自由に動かせます'); });
+$('dimdel').addEventListener('click', () => { const ex = dimPick && existingDim(); if (!ex) return; if (dimPick.before) { DRAWN = JSON.parse(dimPick.before); hist.pop(); dimPick.before = null; } snapshot(); const b = DRAWN.bldgs[dimPick.b]; b.dims = (b.dims || []).filter(d => !(d.k === ex.k && d.be === ex.be && d.le === ex.le && d.bv === ex.bv && d.lv === ex.lv)); save(); startDim(); hud(); draw(); showHint('寸法を外しました。自由に動かせます'); });
+['dv1', 'dv2'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyDim(); } }));
+// 決めた寸法の一覧（下のカード）
+function renderDimList() {
+  const items = [];
+  DRAWN.bldgs.forEach((b, bi) => (b.dims || []).forEach((d, di) => {
+    const who = DRAWN.bldgs.length > 1 ? `建物${bi + 1}の` : '建物の';
+    let t;
+    if (d.k === 'e') t = `${who}辺 → ${sideName(d.le)}から <b>${mm(d.d)}</b>${d.par === false ? '（辺のまん中）' : '（平行）'}`;
+    else { const [e1, e2] = D.cornerEdges(LOT, d.lv); t = `${who}角 → 敷地の角から ${sideName(e1)}に沿って <b>${mm(d.d1)}</b>・${sideName(e2)}に沿って <b>${mm(d.d2)}</b>`; }
+    items.push(`<li><span class="t">${t}</span><button type="button" class="btn btn-sm" data-dedit="${bi},${di}">直す</button><button type="button" class="btn btn-sm" data-ddel="${bi},${di}">外す</button></li>`);
+  }));
+  $('dimlist').innerHTML = items.length ? items.join('') : '<li class="busy">まだありません。下の道具の「寸法」から決められます。</li>';
+  $('dimlist').querySelectorAll('[data-dedit]').forEach(btn => btn.addEventListener('click', () => {
+    const [bi, di] = btn.dataset.dedit.split(',').map(Number), d = DRAWN.bldgs[bi].dims[di];
+    setMode('dim'); dimPick = { step: 4, k: d.k, b: bi, i: d.k === 'e' ? d.be : d.bv, l: d.k === 'e' ? d.le : d.lv, par: d.par }; sel = bi;
+    renderDim(); draw(); $('stagecard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  $('dimlist').querySelectorAll('[data-ddel]').forEach(btn => btn.addEventListener('click', () => {
+    const [bi, di] = btn.dataset.ddel.split(',').map(Number); snapshot(); DRAWN.bldgs[bi].dims.splice(di, 1); save(); hud(); draw(); showHint('寸法を外しました');
+  }));
+}
 let lockT = 0; function lockHint() { const now = performance.now(); if (now - lockT > 2500) { lockT = now; showHint('寸法で決めた所は動きません（寸法の道具で同じ所を押すと外せます）'); } }
 ['dv1', 'dv2'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyDim(); } }));
 $('dimx').addEventListener('click', () => { closeDim(); hud(); draw(); });
