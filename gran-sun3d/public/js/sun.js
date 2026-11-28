@@ -31,9 +31,25 @@
     return c;
   }
 
-  // 影を落とすもの：{p:[[x,z]...], h:高さ m}。範囲（x0..z1）を足して返す
-  function occluder(p, h) {
-    return { p, h, x0: Math.min(...p.map(q => q[0])), x1: Math.max(...p.map(q => q[0])), z0: Math.min(...p.map(q => q[1])), z1: Math.max(...p.map(q => q[1])) };
+  // ---------- 地形 ----------
+  // env.T(x, z)：地面の高さ（敷地の中央を 0 とした m）。env.hor[方角]：遠くの山が見える角度（度）。env.fill：敷地の盛土 m
+  const env = { T: null, hor: null, fill: 0 };
+  function setEnv(o) { Object.assign(env, o || {}); }
+  // 標高の網（terr：{x0, z0, step, nx, nz, hc:[cm...]}）から、地面の高さを返す関数を作る
+  function terrainFn(t) {
+    if (!t) return null;
+    const g = (i, j) => t.hc[Math.max(0, Math.min(t.nz - 1, j)) * t.nx + Math.max(0, Math.min(t.nx - 1, i))] / 100;
+    return (x, z) => { const fi = (x - t.x0) / t.step, fj = (z - t.z0) / t.step, i = Math.floor(fi), j = Math.floor(fj), u = fi - i, v = fj - j;
+      return g(i, j) * (1 - u) * (1 - v) + g(i + 1, j) * u * (1 - v) + g(i, j + 1) * (1 - u) * v + g(i + 1, j + 1) * u * v; };
+  }
+  const ground = (x, z) => env.T ? env.T(x, z) : 0;
+  const lotGround = (x, z) => ground(x, z) + (env.fill || 0); // 敷地の中（盛土を足す）
+  const behindHill = s => !!env.hor && s.alt < env.hor[((Math.round(s.az) % 360) + 360) % 360];
+
+  // 影を落とすもの：{p:[[x,z]...], h:高さ m, base:足元の高さ m}。h は足元からの高さ。範囲（x0..z1）を足して返す
+  function occluder(p, h, base) {
+    base = base || 0;
+    return { p, h: base + h, base, x0: Math.min(...p.map(q => q[0])), x1: Math.max(...p.map(q => q[0])), z0: Math.min(...p.map(q => q[1])), z1: Math.max(...p.map(q => q[1])) };
   }
 
   // 点 (px, 高さ y0, pz) から太陽の方へ伸ばした線が、どれかの建物にさえぎられるか
@@ -61,14 +77,14 @@
     return false;
   }
 
-  // 1日の直射日照時間（時間）。pts は [x, z] か [x, z, 高さ]。10分刻み
+  // 1日の直射日照時間（時間）。pts は敷地の中の [x, z] か [x, z, 地面からの高さ]。10分刻み。山に隠れる時間は入れない
   function sunHours(ds, pts, occ, lat, lon, step) {
     step = step || 10;
     const out = pts.map(() => 0);
     for (let m = 240; m <= 1200; m += step) {
       const s = sun(ms(ds, m), lat, lon);
-      if (s.alt <= 0) continue;
-      pts.forEach((p, i) => { if (!blocked(p[0], p[1], s, occ, p[2])) out[i] += step; });
+      if (s.alt <= 0 || behindHill(s)) continue;
+      pts.forEach((p, i) => { if (!blocked(p[0], p[1], s, occ, lotGround(p[0], p[1]) + (p[2] || 0))) out[i] += step; });
     }
     return out.map(x => x / 60);
   }
@@ -128,7 +144,7 @@
   // 計画の建物（いくつでも・どんな形でも）を置いたときの「南の庭」と「LDK の窓」の日照時間
   // bldgs: [{p:[[x,z]...], h:高さ m}], win: [x,z]（なければ自動）, angle: 図面の向き（南北をどちらに見るか）
   function polyStats(ds, bldgs, win, lot, occ, lat, lon, angle) {
-    const all = occ.concat(bldgs.map(b => occluder(b.p, b.h)));
+    const all = occ.concat(bldgs.map(b => occluder(b.p, b.h, b.base != null ? b.base : planBase(b.p))));
     const a = (angle || 0) * R, north = [Math.sin(a), -Math.cos(a)];
     // 南の庭：敷地のうち建物の外で、真北（図面の向き）を見ると 40m 以内に計画の建物がある所。1m 間隔
     const xs = lot.map(p => p[0]), zs = lot.map(p => p[1]);
@@ -150,5 +166,8 @@
     return polyStats(ds, [{ p: box, h: planHeight(plan.floors, plan.d) }], null, lot, occ, lat, lon, plan.angle);
   }
 
-  return { R, sun, ms, inPoly, occluder, blocked, sunHours, dayInfo, rect, planHeight, planStats, drawHeight, polyStats, autoWindow, polyArea };
+  // 計画の建物の足元：建物の下の地面のいちばん高い所＋盛土
+  function planBase(P) { const c = P.reduce((a, p) => [a[0] + p[0] / P.length, a[1] + p[1] / P.length], [0, 0]); return Math.max(lotGround(c[0], c[1]), ...P.map(p => lotGround(p[0], p[1]))); }
+
+  return { env, setEnv, terrainFn, ground, lotGround, behindHill, planBase, R, sun, ms, inPoly, occluder, blocked, sunHours, dayInfo, rect, planHeight, planStats, drawHeight, polyStats, autoWindow, polyArea };
 });

@@ -20,7 +20,7 @@
   3101 普通 → 2階 6m前後＋切妻（22%は平屋3.3m）。260㎡超は陸屋根6.5〜9m（k=l）
   3102 堅ろう → 9〜16m（k=s）、3111 無壁舎 → 3m（k=n）
 """
-import argparse, json, math, random
+import argparse, json, math, os, random, sys
 
 ROOFC = ['#3d4046', '#4a4f57', '#5b4a3f', '#2f3a4a', '#6b6f73', '#34302d', '#7a5a44']
 WALLC = ['#efece6', '#e6e1d8', '#d9d4cb', '#f4f2ee', '#cfc8bd', '#e9e4dc', '#bfb6aa', '#dcd6cc']
@@ -83,6 +83,7 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--seed', type=int, default=7)
     ap.add_argument('--plateau', help='tools/plateau.py の出力。あれば建物はこちらを使う')
+    ap.add_argument('--terrain', help='tools/terrain.py の出力。あれば地面の高さと遠くの山を入れる')
     a = ap.parse_args()
     d = json.load(open(a.area))
     site = json.load(open(a.site))
@@ -137,6 +138,7 @@ def main():
             one = random.random() < .22
             o.update(k='w', h=3.3 if one else round(random.uniform(5.8, 6.4), 1), r='g', wc=random.choice(WALLC), rc=random.choice(ROOFC), o=obb(P))
         B.append(o)
+    TR = json.load(open(a.terrain)) if a.terrain else None
     W = {0: 3, 1: 4.5, 2: 8, 3: 14, 4: 20}
     RD = [{'p': r['p'], 'w': W.get(r['rnkWidth'], 4)} for r in d['r'] if r['ftCode'] in (2701, 2711)]
     EDGE = [r['p'] for r in d['r'] if r['ftCode'] in (2201, 2203)]
@@ -146,6 +148,10 @@ def main():
            'hNote': '建物の形と高さは3D都市モデル（PLATEAU・国土交通省）の実測。木造は実測の高さを棟とし、4.5寸の切妻で軒の高さを逆算' if PL else '',
            'lat': d.get('lat', site.get('lat')), 'lon': d.get('lon', site.get('lon')),
            'labels': site.get('labels', []), 'lot': LOT, 'b': B, 'r': RD, 'e': EDGE, 'w': WA}
+    if TR:  # 地面の高さと遠くの山（tools/terrain.py）
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from terrain import apply_terrain
+        apply_terrain(out, TR)
     json.dump(out, open(a.out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     print('建物', len(B), '敷地の中で消した建物', removed, '道路', len(RD), '道路のふち', len(EDGE), '敷地面積', round(area(LOT), 1), '㎡')
 

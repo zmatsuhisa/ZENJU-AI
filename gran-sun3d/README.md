@@ -33,7 +33,7 @@
 ```
 cd gran-sun3d
 SITES=<敷地データのフォルダ> npm start   # → http://127.0.0.1:3986/?site=<記号>
-npm test                                 # 太陽の位置・影の判定・計画の建物・線の直し方（19件）
+npm test                                 # 太陽の位置・影の判定・計画の建物・線の直し方（20件）
 ```
 敷地データ（`sites/index.json` と `sites/<記号>.json`）はお客様の敷地の位置と形なので、**リポジトリに入れない**。
 リポジトリの外のフォルダに置いて `SITES` で渡す（`public/sites/` は .gitignore 済み）。
@@ -53,6 +53,19 @@ npm test                                 # 太陽の位置・影の判定・計�
    python3 tools/build_data.py --area <area.json> --site <敷地の設定.json> --out <SITESのフォルダ>/<記号>.json
    ```
 4. `sites/index.json` に足す
+
+### 地面の高さと遠くの山を入れる
+```
+python3 tools/terrain.py --lat <緯度> --lon <経度> --cache <タイルのフォルダ> --out <terrain.json>
+python3 tools/build_data.py ... --terrain <terrain.json>            # 作るときに入れる
+python3 tools/terrain.py --apply <terrain.json> --site-json <SITESのフォルダ>/<記号>.json   # できている敷地データに足す
+```
+- 地面：国土地理院の数値標高モデル 5m メッシュ（航空レーザー測量）を、敷地を中心に 700m 四方・5m 間隔で読む。
+  敷地の中央を 0 とした高さ（cm）で入れ、建物の足元の高さ（`y`）も足す
+- 遠くの山：10m メッシュで半径 30km を見て、方角1度ごとに山が見える角度（`hor`）を出す（地球の丸みと大気の屈折を引く）。
+  太陽がこれより低い時間は日照に数えず、3Dでは光を消して「山の陰」と出す
+- 3D：地面・道路・建物・木・敷地・計画の建物を地面の高さに置く。配置図：等高線と敷地の角・中央の標高。
+  盛土（配置図の設定・`gos-sun-fill-<記号>`）を入れると、計画の建物・南の庭・LDKの窓がその分高くなる
 
 ### 建物を PLATEAU（実測の高さ）にする
 PLATEAU（国交省の3D都市モデル）の建物がある市町村では、建物の形と高さを航空測量の実測にできる。
@@ -85,9 +98,10 @@ public/js/draw.js   手で描いた線を直線・角・マス目にそろえる
 public/js/plan.js   配置図の描画と操作
 tools/extract.py    地理院タイル → area.json
 tools/build_data.py area.json＋敷地の設定（＋plateau.json）→ sites/<記号>.json
+tools/terrain.py    国土地理院の標高タイル → terrain.json（地面の高さと遠くの山）
 tools/plateau.py    PLATEAU の建築物 CityGML → plateau.json（建物の形と実測の高さ）
 server.js           パソコンで開くための小さなサーバー
-test/*.test.js      計算のテスト（19件）
+test/*.test.js      計算のテスト（20件）
 ```
 
 ## claude.ai の Artifact（スマホで開ける版）にするとき

@@ -58,3 +58,25 @@ test('長方形を回す：角度 90 度で東西と南北が入れ替わる', (
   near(Math.max(...xs) - Math.min(...xs), 4, 1e-6, '東西の幅');
   near(Math.max(...zs) - Math.min(...zs), 10, 1e-6, '南北の幅');
 });
+
+test('地形：山の稜線より低い太陽は当たらない／高い所の建物は影が長い', () => {
+  try {
+    const free = S.sunHours('2026-12-22', [[0, 0]], [], LAT, LON)[0];
+    const hor = new Array(360).fill(0); for (let a = 200; a < 300; a++) hor[a] = 5; // 西に 5°の山
+    S.setEnv({ hor });
+    const hill = S.sunHours('2026-12-22', [[0, 0]], [], LAT, LON)[0];
+    assert.ok(hill < free - .2, `山があると日が早く沈む ${free} → ${hill}`);
+    S.setEnv({ hor: null });
+    // 南 8m に高さ 3m の塀。塀の足元が 0 なら冬至の正午は当たる（3/tan31° ≈ 5m）、足元が 2m 高いと当たらない
+    const wall = base => [S.occluder(S.rect(0, 8, 20, .2, 0), 3, base)];
+    const noon = S.sun(S.ms('2026-12-22', 718), LAT, LON);
+    assert.equal(S.blocked(0, 0, noon, wall(0), 0), false);
+    assert.equal(S.blocked(0, 0, noon, wall(2), 0), true);
+    // 標高の網：4 点のまん中は平均
+    const T = S.terrainFn({ x0: 0, z0: 0, step: 10, nx: 2, nz: 2, hc: [0, 100, 200, 300] });
+    assert.ok(Math.abs(T(5, 5) - 1.5) < 1e-9);
+    // 盛土 30cm で窓の高さも上がる（影に入りにくくなる）
+    S.setEnv({ fill: .3 });
+    assert.ok(Math.abs(S.lotGround(0, 0) - .3) < 1e-9);
+  } finally { S.setEnv({ T: null, hor: null, fill: 0 }); }
+});

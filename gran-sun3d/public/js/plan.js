@@ -8,7 +8,7 @@ const mm = m => Math.round(m * 1000).toLocaleString('ja-JP');
 const YEAR = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 4);
 
 // ---------- 設定 ----------
-const SET = Object.assign({ straight: 1, strength: 12, step: 90, grid: .91, close: 30, setback: 1 }, store.get('gos-sun-draw-set') || {});
+const SET = Object.assign({ straight: 1, strength: 12, step: 90, grid: .91, close: 30, setback: 1, contour: 1 }, store.get('gos-sun-draw-set') || {});
 function syncSet() {
   document.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.val === +SET[b.dataset.set])));
   const sl = { 0: '', 90: '直角に', 45: '45°ごとに' }[SET.step];
@@ -36,9 +36,14 @@ function lotAngle(P) {
 // 直した高さの保存先。建物のデータ（地理院／PLATEAU）が変わると番号も変わるので分ける
 const hKey = () => 'gos-sun-h-' + SITE + (SD && SD.src && SD.src !== '地理院' ? '-pl' : '');
 // まわりの建物の高さ（3Dのページで直したものを使う）
-function loadHeights() { const H = store.get(hKey()) || {}; OCC = SD.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h); }); }
+function loadHeights() { const H = store.get(hKey()) || {}; OCC = SD.b.map((b, i) => { const h = H[i] != null ? H[i] : b.h; return S.occluder(b.p, b.r === 'g' ? h + b.o.W * .11 : h, b.y || 0); }); }
+// 地形（地面の高さ・遠くの山・盛土）
+const fillKey = () => 'gos-sun-fill-' + SITE;
+function loadTerrain() { S.setEnv({ T: S.terrainFn(SD.terr), hor: SD.hor || null, fill: store.get(fillKey()) || 0 }); $('fillin').value = Math.round((S.env.fill || 0) * 1000); contourCache = null; }
+$('fillin').addEventListener('change', e => { const v = +e.target.value; if (!isFinite(v)) return; store.set(fillKey(), v / 1000); S.setEnv({ fill: v / 1000 }); later(calc, 200); draw(); });
 function loadSiteData(data, key) {
   SD = data; SITE = key; LOT = data.lot; ANG = lotAngle(LOT);
+  loadTerrain();
   store.set('gos-sun-site', key);
   // マス目の原点：図面の向きで見た敷地の北西の角
   const uv = LOT.map(p => D.toUV(p, ANG)); ORG = D.toXZ([Math.min(...uv.map(q => q[0])), Math.min(...uv.map(q => q[1]))], ANG);
@@ -115,6 +120,7 @@ function draw() {
   // 敷地
   g.fillStyle = 'rgba(90,168,100,.18)'; g.strokeStyle = '#3f8f4c'; g.lineWidth = 2; g.beginPath(); path(LOT, true); g.fill(); g.stroke();
   if (SET.setback && setbackLine.length) { g.setLineDash([6, 5]); g.strokeStyle = 'rgba(63,143,76,.8)'; g.lineWidth = 1.2; g.beginPath(); path(setbackLine, true); g.stroke(); g.setLineDash([]); }
+  if (SET.contour && SD.terr) drawContours();
   edgeLabels(LOT, true, '#2f6e3a');
   // 描いた建物
   DRAWN.bldgs.forEach((b, i) => {
@@ -187,6 +193,41 @@ function drawDims() {
 // 境界の呼び名（内向きの法線と反対の方角）
 const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
 function sideName(e) { const n = D.inwardNormal(LOT, e), az = Math.atan2(-n[0], n[1]) / D.R; return DIR8[Math.round(((az % 360) + 360) % 360 / 45) % 8] + '側の境界'; }
+// 等高線：敷地のまわり（±12m）を 0.5m 間隔で読み、高さの幅に合わせた間隔で引く（数字は標高 m）
+let contourCache = null;
+function drawContours() {
+  if (!contourCache) {
+    const xs = LOT.map(p => p[0]), zs = LOT.map(p => p[1]), m = 12, st = .5;
+    const x0 = Math.min(...xs) - m, z0 = Math.min(...zs) - m, nx = Math.ceil((Math.max(...xs) + m - x0) / st), nz = Math.ceil((Math.max(...zs) + m - z0) / st);
+    const v = []; for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) v.push(S.ground(x0 + i * st, z0 + j * st));
+    const lo = Math.min(...v), hi = Math.max(...v), iv = [.05, .1, .2, .25, .5, 1, 2].find(d => (hi - lo) / d <= 14) || 2;
+    const segs = [], at = (i, j) => v[j * (nx + 1) + i];
+    for (let lv = Math.ceil(lo / iv) * iv; lv <= hi; lv += iv) {
+      const list = [];
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const c = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]], val = c.map(([a, b]) => at(a, b)), pts = [];
+        for (let k = 0; k < 4; k++) { const a = val[k], b = val[(k + 1) % 4]; if ((a < lv) !== (b < lv)) { const t = (lv - a) / (b - a), [i1, j1] = c[k], [i2, j2] = c[(k + 1) % 4]; pts.push([x0 + (i1 + (i2 - i1) * t) * st, z0 + (j1 + (j2 - j1) * t) * st]); } }
+        if (pts.length >= 2) list.push([pts[0], pts[1]]); if (pts.length === 4) list.push([pts[2], pts[3]]);
+      }
+      if (list.length) segs.push({ lv, list });
+    }
+    contourCache = { segs, iv };
+  }
+  const e0 = SD.terr.e0;
+  contourCache.segs.forEach(({ lv, list }, n) => {
+    const major = Math.abs(Math.round(lv / (contourCache.iv * 5)) * contourCache.iv * 5 - lv) < 1e-6;
+    g.strokeStyle = major ? 'rgba(150,90,30,.75)' : 'rgba(150,90,30,.45)'; g.lineWidth = major ? 1.6 : 1; g.beginPath();
+    list.forEach(([a, b]) => { const [x1, y1] = toS(a), [x2, y2] = toS(b); g.moveTo(x1, y1); g.lineTo(x2, y2); }); g.stroke();
+    // 数字：敷地にいちばん近い所に1つ
+    let best = null; list.forEach(([a, b]) => { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = D.dist(m, centroid(LOT)); if (!best || d < best.d) best = { d, m }; });
+    if (best && view.s > 6) label((e0 + lv).toFixed(contourCache.iv < .1 ? 2 : 1), best.m, { size: 10, color: '#8a5a1e', bg: 'rgba(255,255,255,.75)', weight: 600 });
+  });
+  // 敷地の角と中央の標高
+  if (view.s > 8) {
+    LOT.forEach(p => { const c = centroid(LOT), d = D.dist(p, c) || 1, q = [p[0] + (p[0] - c[0]) / d * 26 / view.s, p[1] + (p[1] - c[1]) / d * 26 / view.s]; label((e0 + S.ground(p[0], p[1])).toFixed(2), q, { size: 10, color: '#8a5a1e', bg: 'rgba(255,248,236,.9)' }); });
+    const c = centroid(LOT); label(`中央 ${(e0 + S.ground(c[0], c[1])).toFixed(2)}${S.env.fill ? `（盛土 +${Math.round(S.env.fill * 1000)}）` : ''}`, [c[0], c[1] - 30 / view.s], { size: 10, color: '#8a5a1e', bg: 'rgba(255,248,236,.9)' });
+  }
+}
 // 敷地からはみ出しているか（角が敷地の外、または辺が境界をまたぐ）
 function outside(P) {
   if (P.some(p => !D.inPoly(p[0], p[1], LOT) && D.dist(nearLot(p), p) > .02)) return true;
@@ -405,9 +446,10 @@ const shadeCv = document.createElement('canvas'), sg = shadeCv.getContext('2d');
 function drawShadows() {
   const t = shadeDay(), s = S.sun(S.ms(YEAR + '-' + t.md, t.m), SD.lat, SD.lon);
   if (s.alt <= 0) { label('日が沈んでいます', toW(W / 2, 60), { size: 12 }); return; }
+  if (S.behindHill(s)) { label('太陽が遠くの山に隠れています', toW(W / 2, 60), { size: 12 }); return; }
   shadeCv.width = cv.width; shadeCv.height = cv.height; sg.setTransform(dpr, 0, 0, dpr, 0, 0); sg.fillStyle = '#1d2433';
   const k = 1 / Math.tan(s.alt * D.R), dx = -Math.sin(s.az * D.R) * k, dz = Math.cos(s.az * D.R) * k;
-  const shapes = OCC.map(o => ({ p: o.p, h: o.h })).concat(DRAWN.bldgs.map(b => ({ p: b.p, h: S.drawHeight(b.f) })));
+  const shapes = OCC.map(o => ({ p: o.p, h: o.h - (o.base || 0) })).concat(DRAWN.bldgs.map(b => ({ p: b.p, h: S.drawHeight(b.f) })));
   const vx0 = toW(0, 0), vx1 = toW(W, Hh);
   shapes.forEach(({ p, h }) => {
     const ox = dx * h, oz = dz * h;
@@ -423,6 +465,7 @@ function drawShadows() {
 addEventListener('storage', e => {
   if (e.key === TK) { syncShadeUI(); draw(); }
   if (SD && e.key === hKey()) { loadHeights(); later(calc, 300); draw(); }
+  if (SD && e.key === fillKey()) { loadTerrain(); later(calc, 300); draw(); }
   if (SD && e.key === saveKey()) { DRAWN = store.get(saveKey()) || { bldgs: [], win: null }; hud(); draw(); later(calc, 300); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && SD) { loadHeights(); syncShadeUI(); draw(); later(calc, 300); } });

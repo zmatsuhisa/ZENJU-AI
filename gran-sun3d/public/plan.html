@@ -111,9 +111,14 @@
         <div class="seg" role="group" aria-label="マス目に寄せる"><button type="button" data-set="grid" data-val="0.91">910</button><button type="button" data-set="grid" data-val="0.455">455</button><button type="button" data-set="grid" data-val="1">1000</button><button type="button" data-set="grid" data-val="0">寄せない</button></div>
         <span class="sk">自動で閉じる</span>
         <div class="seg" role="group" aria-label="自動で閉じる距離"><button type="button" data-set="close" data-val="0">しない</button><button type="button" data-set="close" data-val="30">近いとき</button><button type="button" data-set="close" data-val="60">少し離れていても</button></div>
+        <span class="sk">地面の高さ（等高線）</span>
+        <div class="seg" role="group" aria-label="地面の高さ"><button type="button" data-set="contour" data-val="1">出す</button><button type="button" data-set="contour" data-val="0">出さない</button></div>
+        <span class="sk">敷地の盛土</span>
+        <label class="dimin fillin"><span>今の地面から</span><input type="number" id="fillin" inputmode="numeric" step="50" value="0"><small>mm</small></label>
         <span class="sk">境界から50cmの線</span>
         <div class="seg" role="group" aria-label="境界から50cmの線"><button type="button" data-set="setback" data-val="1">出す</button><button type="button" data-set="setback" data-val="0">出さない</button></div>
       </div>
+      <p class="tip">等高線は国土地理院の5mメッシュ（航空レーザー測量）から引いた地面の高さで、数字は標高（m）です。盛土を入れると、計画の建物・南の庭・LDKの窓がその分高くなって計算されます（3Dにも出ます）。</p>
       <p class="tip">マス目の 910 は尺モジュール（910mm）、455 はその半分。辺の長さは mm で出ます。境界から50cmの線は、民法で建物を離す目安です。</p>
     </div>
   </section>
